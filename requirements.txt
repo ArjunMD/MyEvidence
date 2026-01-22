@@ -1,0 +1,5 @@
+streamlit>=1.45,<2
+pandas>=2.2,<4
+requests>=2.31,<3
+azure-ai-documentintelligence>=1.0.0
+azure-core>=1.29

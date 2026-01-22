@@ -1,0 +1,59 @@
+# ---- Streamlit ----
+# Keep config in repo, but NEVER commit secrets.
+.streamlit/secrets.toml
+.streamlit/secrets.*
+
+# Allow common non-secret Streamlit config files
+!.streamlit/config.toml
+!.streamlit/theme.toml
+
+# ---- App data / local artifacts ----
+/data/
+/Versions/
+/versions/
+
+# Databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.wal
+*.shm
+
+# Data files (common)
+*.parquet
+*.csv
+*.tsv
+*.jsonl
+*.pkl
+*.pickle
+*.pdf
+*.zip
+*.gz
+
+# ---- Secrets / env ----
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Virtualenv / tooling ----
+.venv/
+venv/
+ENV/
+
+# ---- OS / editor ----
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
