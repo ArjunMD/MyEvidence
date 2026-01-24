@@ -8,7 +8,6 @@
 !.streamlit/theme.toml
 
 # ---- App data / local artifacts ----
-/data/
 /Versions/
 /versions/
 
