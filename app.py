@@ -989,6 +989,13 @@ elif page == "DB Search":
 elif page == "DB Browse":
     st.title("🗂️ Browse")
 
+    by_specialty = st.toggle(
+        "Browse by specialty",
+        value=False,
+        key="browse_by_specialty",
+        help="On: Specialty → Year. Off: Year only.",
+    )
+
     items: List[Dict[str, str]] = []
     items.extend(list_browse_items(limit=BROWSE_MAX_ROWS))
     items.extend(list_browse_guideline_items(limit=BROWSE_MAX_ROWS))
@@ -997,34 +1004,96 @@ elif page == "DB Browse":
         st.info("No saved articles yet.")
         st.stop()
 
-    grouped: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
-    for it in items:
-        year = (it.get("year") or "").strip() or "Unknown"
-        for spec in _split_specialties(it.get("specialty") or ""):
-            grouped.setdefault(spec, {}).setdefault(year, []).append(it)
+    if by_specialty:
+        grouped: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
+        for it in items:
+            year = (it.get("year") or "").strip() or "Unknown"
+            for spec in _split_specialties(it.get("specialty") or ""):
+                grouped.setdefault(spec, {}).setdefault(year, []).append(it)
 
-    specialties = sorted(grouped.keys(), key=lambda s: (s == "Unspecified", s.lower()))
+        specialties = sorted(grouped.keys(), key=lambda s: (s == "Unspecified", s.lower()))
 
-    for spec in specialties:
-        years_map = grouped.get(spec, {})
-        years = sorted(years_map.keys(), key=_year_sort_key)
+        for spec in specialties:
+            years_map = grouped.get(spec, {})
+            years = sorted(years_map.keys(), key=_year_sort_key)
+            years = list(reversed(years))
+
+            with st.expander(spec, expanded=False):
+                for y in years:
+                    st.markdown(f"**{y}**")
+                    for it in years_map.get(y, []):
+                        if (it.get("type") or "") == "guideline":
+                            title = (it.get("title") or "").strip() or "(no name)"
+                            st.markdown(f"- {title}")
+                        else:
+                            pmid = it.get("pmid") or ""
+                            title = (it.get("title") or "").strip() or "(no title)"
+                            concl = (it.get("authors_conclusions") or "").strip()
+                            st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
+                            j = (it.get("journal") or "").strip()
+                            pn = (it.get("patient_n") or "").strip()
+
+                            meta_bits = []
+                            if pn:
+                                meta_bits.append(f"N={pn}")
+                            if j:
+                                meta_bits.append(j)
+                            meta = ", ".join(meta_bits)
+
+                            if concl:
+                                st.caption(f"Author's conclusion: {concl}{f' ({meta})' if meta else ''}")
+                            elif meta:
+                                st.caption(f"({meta})")
+
+                    st.markdown("")
+    else:
+        by_year: Dict[str, List[Dict[str, str]]] = {}
+        for it in items:
+            year = (it.get("year") or "").strip() or "Unknown"
+            by_year.setdefault(year, []).append(it)
+
+        years = sorted(by_year.keys(), key=_year_sort_key)
         years = list(reversed(years))
 
-        with st.expander(spec, expanded=False):
-            for y in years:
-                st.markdown(f"**{y}**")
-                for it in years_map.get(y, []):
-                    if (it.get("type") or "") == "guideline":
-                        title = (it.get("title") or "").strip() or "(no name)"
-                        st.markdown(f"- {title}")
-                    else:
-                        pmid = it.get("pmid") or ""
-                        title = (it.get("title") or "").strip() or "(no title)"
-                        concl = (it.get("authors_conclusions") or "").strip()
-                        st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
-                        if concl:
-                            st.caption(concl)
-                st.markdown("")
+        for idx, y in enumerate(years):
+            if idx > 0:
+                st.markdown("---")
+            st.markdown(f"### {y}")
+
+            rows = by_year.get(y, [])
+            rows = sorted(
+                rows,
+                key=lambda r: (
+                    (r.get("type") or "").lower(),
+                    (r.get("title") or "").lower(),
+                    (r.get("pmid") or "").lower(),
+                ),
+            )
+
+            for it in rows:
+                if (it.get("type") or "") == "guideline":
+                    title = (it.get("title") or "").strip() or "(no name)"
+                    st.markdown(f"- {title}")
+                else:
+                    pmid = it.get("pmid") or ""
+                    title = (it.get("title") or "").strip() or "(no title)"
+                    concl = (it.get("authors_conclusions") or "").strip()
+                    st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
+                    j = (it.get("journal") or "").strip()
+                    pn = (it.get("patient_n") or "").strip()
+
+                    meta_bits = []
+                    if pn:
+                        meta_bits.append(f"N={pn}")
+                    if j:
+                        meta_bits.append(j)
+                    meta = ", ".join(meta_bits)
+
+                    if concl:
+                        st.caption(f"Author's conclusion: {concl}{f' ({meta})' if meta else ''}")
+                    elif meta:
+                        st.caption(f"({meta})")
+
 
 # =======================
 # Page: Guidelines (PDF Upload + Azure Extract)

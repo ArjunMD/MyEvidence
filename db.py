@@ -169,7 +169,7 @@ def list_browse_items(limit: int) -> List[Dict[str, str]]:
     with _connect_db() as conn:
         rows = conn.execute(
             """
-            SELECT pmid, title, year, specialty, authors_conclusions
+            SELECT pmid, title, year, journal, patient_n, specialty, authors_conclusions
             FROM abstracts
             ORDER BY
                 specialty COLLATE NOCASE ASC,
@@ -187,8 +187,10 @@ def list_browse_items(limit: int) -> List[Dict[str, str]]:
                 "pmid": (r["pmid"] or "").strip(),
                 "title": (r["title"] or "").strip(),
                 "year": (r["year"] or "").strip(),
+                "journal": (r["journal"] or "").strip(),
+                "patient_n": str(r["patient_n"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
-                "authors_conclusions": (r["authors_conclusions"] or "").strip(),
+                "authors_conclusions": (r["authors_conclusions"] or "").strip(),    
             }
         )
     return out
