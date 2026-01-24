@@ -10,9 +10,11 @@
 # ---- App data / local artifacts ----
 /Versions/
 /versions/
+#/Data
+#/data
 
 # Databases and dumps
-*.db
+#*.db
 *.sqlite
 *.sqlite3
 *.wal
