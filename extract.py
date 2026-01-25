@@ -12,6 +12,7 @@ import requests
 import streamlit as st
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 try:
     from azure.core.credentials import AzureKeyCredential
@@ -299,6 +300,72 @@ def _openai_model() -> str:
     except Exception:
         pass
     return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-5.2")
+
+
+
+# ---------------- Semantic Scholar helpers ----------------
+
+SEMANTIC_SCHOLAR_RECOMMEND_FORPAPER_URL = "https://api.semanticscholar.org/recommendations/v1/papers/forpaper/"
+
+def _semantic_scholar_api_key() -> str:
+    """Return Semantic Scholar API key (supports multiple secrets.toml layouts)."""
+    try:
+        if "SEMANTIC_SCHOLAR_API_KEY" in st.secrets:
+            return str(st.secrets["SEMANTIC_SCHOLAR_API_KEY"]).strip()
+    except Exception:
+        pass
+    try:
+        if "semantic_scholar" in st.secrets and "api_key" in st.secrets["semantic_scholar"]:
+            return str(st.secrets["semantic_scholar"]["api_key"]).strip()
+    except Exception:
+        pass
+    return os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
+
+@st.cache_data(show_spinner=False, ttl=60 * 60)
+def get_s2_similar_papers(pmid: str, top_n: int = 5) -> List[Dict[str, str]]:
+    """Return top Semantic Scholar recommendations for a PubMed PMID."""
+    pmid = (pmid or "").strip()
+    if not pmid:
+        return []
+
+    api_key = _semantic_scholar_api_key()
+    if not api_key:
+        raise ValueError(
+            "Semantic Scholar API key not found. Add SEMANTIC_SCHOLAR_API_KEY to .streamlit/secrets.toml "
+            "or set the SEMANTIC_SCHOLAR_API_KEY environment variable."
+        )
+
+    # Recommendations API accepts paper ids including PMID/PMCID/DOI formats.
+    # Use explicit 'PMID:' prefix to avoid ambiguity.
+    paper_id = f"PMID:{pmid}"
+    url = SEMANTIC_SCHOLAR_RECOMMEND_FORPAPER_URL + quote(paper_id, safe="")
+    params = {
+        "limit": str(int(top_n)),
+        "fields": "title,url,year,externalIds",
+    }
+    headers = {"x-api-key": api_key}
+
+    sess = _requests_session()
+    r = sess.get(url, params=params, headers=headers, timeout=30)
+    r.raise_for_status()
+
+    payload = r.json() or {}
+    recs = payload.get("recommendedPapers") or []
+
+    out: List[Dict[str, str]] = []
+    for p in recs[: int(top_n)]:
+        ext = p.get("externalIds") or {}
+        out.append(
+            {
+                "title": (p.get("title") or "").strip(),
+                "url": (p.get("url") or "").strip(),
+                "paperId": (p.get("paperId") or "").strip(),
+                "year": str(p.get("year") or "").strip(),
+                "pmid": str(ext.get("PubMed") or "").strip(),
+                "doi": str(ext.get("DOI") or "").strip(),
+            }
+        )
+    return out
 
 
 def _post_with_retries(

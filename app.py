@@ -44,6 +44,7 @@ from extract import (
     parse_journal,
     parse_title,
     get_top_neighbors,
+    get_s2_similar_papers,
     gpt_extract_patient_n,
     gpt_extract_study_design,
     gpt_extract_patient_details,
@@ -264,7 +265,7 @@ def gpt_generate_meta_combined(
     guideline_ids = [g.strip() for g in (guideline_ids or []) if g and g.strip()]
     if not pmids and not guideline_ids:
         return ""
-    # Build blocks for studies
+    # Build blocks for studies``
     blocks: List[str] = []
     idx = 1
     for p in pmids:
@@ -673,7 +674,7 @@ if page == "PMID → Abstract":
             else:
                 st.warning("No abstract found for this PMID (or PubMed returned no AbstractText).")
 
-            with st.expander("Related articles (top 5)"):
+            with st.expander("Pubmed Related articles (top 5)"):
                 try:
                     neighbors = get_top_neighbors(last_pmid, top_n=5)
                     if not neighbors:
@@ -687,6 +688,32 @@ if page == "PMID → Abstract":
                     st.error(f"Neighbors lookup failed: {e}")
                 except Exception as e:
                     st.error(f"Neighbors lookup error: {e}")
+
+
+            with st.expander("Semantic Scholar similar papers (top 5)"):
+                try:
+                    s2_papers = get_s2_similar_papers(last_pmid, top_n=5)
+                    if not s2_papers:
+                        st.info("No Semantic Scholar recommendations returned.")
+                    else:
+                        for p in s2_papers:
+                            title = (p.get("title") or "").strip() or (p.get("pmid") or p.get("paperId") or "(no title)")
+                            url = (p.get("url") or "").strip()
+                            tag = ""
+                            if (p.get("pmid") or "").strip():
+                                tag = f" — `{p['pmid']}`"
+                            elif (p.get("paperId") or "").strip():
+                                tag = f" — `{p['paperId']}`"
+                            if url:
+                                st.markdown(f"- [{title}]({url}){tag}")
+                            else:
+                                st.markdown(f"- {title}{tag}")
+                except ValueError as e:
+                    st.warning(str(e))
+                except requests.HTTPError as e:
+                    st.error(f"Semantic Scholar lookup failed: {e}")
+                except Exception as e:
+                    st.error(f"Semantic Scholar lookup error: {e}")
 
 
         with right:
@@ -842,7 +869,7 @@ elif page == "DB Search":
             with st.expander("Original abstract"):
                 _render_plain_text(abstract)
 
-        with st.expander("Related articles (top 5)"):
+        with st.expander("PubMed Related articles (top 5)"):
             try:
                 neighbors = get_top_neighbors(selected_pmid, top_n=5)
                 if not neighbors:
@@ -856,6 +883,32 @@ elif page == "DB Search":
                 st.error(f"Neighbors lookup failed: {e}")
             except Exception as e:
                 st.error(f"Neighbors lookup error: {e}")
+
+
+        with st.expander("Semantic Scholar similar papers (top 5)"):
+            try:
+                s2_papers = get_s2_similar_papers(selected_pmid, top_n=5)
+                if not s2_papers:
+                    st.info("No Semantic Scholar recommendations returned.")
+                else:
+                    for p in s2_papers:
+                        title = (p.get("title") or "").strip() or (p.get("pmid") or p.get("paperId") or "(no title)")
+                        url = (p.get("url") or "").strip()
+                        tag = ""
+                        if (p.get("pmid") or "").strip():
+                            tag = f" — `{p['pmid']}`"
+                        elif (p.get("paperId") or "").strip():
+                            tag = f" — `{p['paperId']}`"
+                        if url:
+                            st.markdown(f"- [{title}]({url}){tag}")
+                        else:
+                            st.markdown(f"- {title}{tag}")
+            except ValueError as e:
+                st.warning(str(e))
+            except requests.HTTPError as e:
+                st.error(f"Semantic Scholar lookup failed: {e}")
+            except Exception as e:
+                st.error(f"Semantic Scholar lookup error: {e}")
 
     else:
         gid = (selected.get("guideline_id") or "").strip()
