@@ -46,6 +46,11 @@ OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 GUIDELINE_ELEMENT_MAX_CHARS = 4500
 GUIDELINE_CANDIDATE_MAX = 250
 
+GUIDELINE_OPENAI_BATCH_SIZE = 20  # OpenAI decides which candidates are true recommendations
+GUIDELINE_OPENAI_MAX_CHARS_PER_ITEM = 1800
+
+GUIDELINE_OPENAI_STRICTNESS = os.getenv("GUIDELINE_OPENAI_STRICTNESS", "medium").strip().lower()
+
 _RECO_HINT_RE = re.compile(
     r"(?i)\b(recommend|recommended|should|we suggest|we recommend|is indicated|are indicated|is not recommended|do not|avoid|consider)\b"
 )
@@ -973,6 +978,18 @@ def _split_markdown_into_elements(md: str) -> List[Dict[str, str]]:
             i += 1
             continue
 
+        # Boxed / callout text often shows up as blockquotes in Azure DI markdown
+        if ln.lstrip().startswith(">"):
+            flush_paragraph()
+            q: List[str] = []
+            while i < len(lines) and lines[i].lstrip().startswith(">"):
+                q.append(re.sub(r"^\s*>\s?", "", lines[i]).rstrip())
+                i += 1
+            content = " ".join([x for x in q if x.strip()]).strip()
+            if content:
+                out.append({"kind": "callout", "content": content})
+            continue
+
         # Table: header line + separator line
         if ("|" in ln) and (i + 1 < len(lines)) and table_sep_re.match(lines[i + 1] or ""):
             flush_paragraph()
@@ -1142,6 +1159,188 @@ def _openai_extract_recos_from_element(element_text: str) -> List[Dict[str, str]
     return out
 
 
+def _openai_extract_recos_from_elements_batch(batch: List[Dict]) -> List[Dict[str, str]]:
+    """Batch extractor: OpenAI decides which items are *formal* guideline recommendations."""
+    key = _openai_api_key()
+    if not key:
+        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+
+    if not batch:
+        return []
+
+    cand = []
+    for it in batch:
+        try:
+            idx = int(it.get("idx"))
+        except Exception:
+            continue
+        kind = (it.get("kind") or "text").strip()
+        section = (it.get("section") or "").strip()
+        text = (it.get("content") or "").strip()
+        if not text:
+            continue
+        cand.append(
+            {
+                "idx": idx,
+                "kind": kind,
+                "section": section[:120],
+                "text": text[:GUIDELINE_OPENAI_MAX_CHARS_PER_ITEM],
+            }
+        )
+
+    if not cand:
+        return []
+
+    strictness = (GUIDELINE_OPENAI_STRICTNESS or "medium").strip().lower()
+
+    if strictness == "strict":
+        instructions = """You are a STRICT extractor of *formal* clinical guideline recommendations.
+Input is a JSON array of candidate snippets from a guideline PDF.
+Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
+
+Only output items when you are confident the text is intended as an actual guideline recommendation/statement:
+- Typically appears as a list item, table row, or boxed/callout text.
+- Or explicitly labeled (e.g., 'Recommendation', 'Statement', 'Practice Point', 'Key recommendation').
+- Or contains explicit strength/grade markers (Class/Level/LOE/GRADE/etc.).
+
+Do NOT extract:
+- Background, rationale, narrative discussion, evidence summaries, methods.
+- 'Recommended daily allowance' / nutrition RDAs, reporting checklists, or 'recommended for future research'.
+- Anything that is not an actionable clinical directive.
+
+For kind='text' (plain paragraph): be EXTRA strict — only extract if it is clearly labeled as a recommendation or includes explicit grading/strength. If unsure, omit.
+
+Return ONLY valid JSON with this exact shape:
+{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
+
+Rules:
+- Use ONLY what is explicitly present in the provided text; never infer.
+- idx MUST be one of the provided idx values.
+- recommendation_text: include the full actionable recommendation sentence(s).
+- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
+- source_snippet: verbatim excerpt <= 240 chars from the candidate text.
+- Strings only (no nulls). If none qualify, return {"items":[]}"""
+    elif strictness == "loose":
+        instructions = """You extract clinical guideline recommendations with good recall (still avoid obvious false positives).
+Input is a JSON array of candidate snippets from a guideline PDF.
+Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
+
+Extract items that read like actionable guidance (directive language) even if not graded, especially when:
+- kind is list_item/table_row/callout, OR
+- section heading suggests recommendations/guidance/statements/algorithm/summary, OR
+- the snippet is short and directive.
+
+When a snippet includes rationale + recommendation, extract ONLY the directive sentence(s).
+
+Do NOT extract:
+- Recommended daily allowance / nutrition RDAs, reporting checklists, or future research recommendations.
+- Methods, literature review, background.
+
+Return ONLY valid JSON with this exact shape:
+{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
+
+Rules:
+- Use ONLY what is explicitly present in the provided text; never infer.
+- idx MUST be one of the provided idx values.
+- strength_raw/evidence_raw only if explicitly stated, else empty string.
+- source_snippet <= 240 chars.
+- If none qualify, return {"items":[]}"""
+    else:
+        instructions = """You extract clinical guideline recommendations with HIGH precision and balanced recall.
+Input is a JSON array of candidate snippets from a guideline PDF.
+Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
+
+A recommendation is an *actionable clinical directive* intended as guidance (for clinicians/patients).
+Prefer TRUE recommendations; skip narrative evidence summaries.
+
+Strong signals (any one can be sufficient):
+- kind is list_item, table_row, or callout (boxed text).
+- The section heading suggests recommendations/guidance/statements/algorithm/summary.
+- The text contains directive language (e.g., should, must, we recommend, do not, avoid, consider, offer, use, initiate, administer, discontinue).
+- Explicit labels (Recommendation/Statement/Practice Point/Key recommendation) or grading (Class/Level/LOE/GRADE/etc.).
+
+For kind='text' (plain paragraph): extract if BOTH are true:
+1) It contains clear directive language; AND
+2) It is either (a) under a recommendation-like section heading OR (b) explicitly labeled/graded OR (c) short and directive (roughly <= 450 characters of main directive text).
+If a paragraph mixes rationale + recommendation, extract ONLY the recommendation sentence(s) and omit rationale.
+
+Do NOT extract:
+- Background, rationale-only discussion, evidence summaries, methods.
+- 'Recommended daily allowance' / nutrition RDAs, reporting checklists, or 'recommended for future research'.
+- Vague non-directive statements ("may be beneficial") unless clearly framed as guidance.
+
+Return ONLY valid JSON with this exact shape:
+{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
+
+Rules:
+- Use ONLY what is explicitly present in the provided text; never infer.
+- idx MUST be one of the provided idx values.
+- recommendation_text: include the full actionable recommendation sentence(s).
+- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
+- source_snippet: verbatim excerpt <= 240 chars from the candidate text.
+- Strings only (no nulls). If none qualify, return {"items":[]}"""
+
+    payload = {
+        "model": _openai_model(),
+        "instructions": instructions,
+        "input": "CANDIDATES_JSON:\n" + json.dumps(cand, ensure_ascii=False) + "\n\nReturn JSON now.",
+        "text": {"verbosity": "low"},
+        "max_output_tokens": 1400,
+        "temperature": 0,
+        "store": False,
+    }
+
+    r = requests.post(
+        OPENAI_RESPONSES_URL,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=90,
+    )
+    r.raise_for_status()
+
+    raw = (_extract_output_text(r.json()) or "").strip()
+    if not raw:
+        return []
+
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
+        if not m:
+            return []
+        try:
+            obj = json.loads(m.group(1))
+        except Exception:
+            return []
+
+    items = obj.get("items")
+    if not isinstance(items, list):
+        return []
+
+    out: List[Dict[str, str]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            idx = int(it.get("idx"))
+        except Exception:
+            continue
+        rec = (it.get("recommendation_text") or "").strip()
+        if not rec:
+            continue
+        out.append(
+            {
+                "idx": str(idx),
+                "recommendation_text": rec,
+                "strength_raw": (it.get("strength_raw") or "").strip(),
+                "evidence_raw": (it.get("evidence_raw") or "").strip(),
+                "source_snippet": (it.get("source_snippet") or "").strip(),
+            }
+        )
+
+    return out
+
+
 def extract_and_store_guideline_recommendations_azure(guideline_id: str, progress_cb=None) -> int:
     """
     Azure DI markdown -> elements -> candidates -> OpenAI -> store via db.py
@@ -1159,13 +1358,22 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
 
     elements = _split_markdown_into_elements(md)
 
-    candidates: List[Tuple[int, str, str]] = []
+    # Build candidates using *format* first, then let OpenAI decide what's truly a recommendation.
+    current_section = ""
+    candidates: List[Dict] = []
     for idx, el in enumerate(elements):
-        c = (el.get("content") or "").strip()
-        if not c:
+        kind = (el.get("kind") or "text").strip()
+        content = (el.get("content") or "").strip()
+        if not content:
             continue
-        if _is_candidate_reco(c):
-            candidates.append((idx, el.get("kind") or "text", c))
+
+        if kind == "heading":
+            current_section = content
+            continue
+
+        is_structured = kind in ("list_item", "table_row", "callout")
+        if is_structured or _is_candidate_reco(content):
+            candidates.append({"idx": idx, "kind": kind, "section": current_section, "content": content})
 
     if not candidates:
         return 0
@@ -1176,26 +1384,44 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
     stored = 0
     seen = set()
 
-    for j, (idx, kind, content) in enumerate(candidates, start=1):
+    # Store candidate elements (best-effort) and precompute hashes
+    hash_by_idx: Dict[int, str] = {}
+    for j, it in enumerate(candidates, start=1):
         if progress_cb:
             progress_cb(j, len(candidates))
-
+        idx = int(it["idx"])
+        kind = it.get("kind") or "text"
+        content = it.get("content") or ""
         content_hash = _hash_text(content)
+        hash_by_idx[idx] = content_hash
 
-        # store candidate element for debugging (best-effort)
         try:
-            insert_guideline_element(gid, int(idx), kind, content, content_hash)
+            insert_guideline_element(gid, idx, kind, content, content_hash)
         except Exception:
             pass
 
-        recos = _openai_extract_recos_from_element(content)
+    # Ask OpenAI (in batches) which candidates are *formal* recommendations and extract them.
+    for b0 in range(0, len(candidates), GUIDELINE_OPENAI_BATCH_SIZE):
+        batch = candidates[b0 : b0 + GUIDELINE_OPENAI_BATCH_SIZE]
+        if progress_cb:
+            progress_cb(min(b0 + len(batch), len(candidates)), len(candidates))
+
+        recos = _openai_extract_recos_from_elements_batch(batch)
         if not recos:
             continue
 
         for rco in recos:
+            try:
+                idx = int(rco.get("idx") or -1)
+            except Exception:
+                continue
+            if idx < 0:
+                continue
+
             rec_text = (rco.get("recommendation_text") or "").strip()
             if not rec_text:
                 continue
+
             dedupe_key = (
                 rec_text.lower(),
                 (rco.get("strength_raw") or "").lower(),
@@ -1213,7 +1439,7 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
                     strength_raw=(rco.get("strength_raw") or "").strip() or None,
                     evidence_raw=(rco.get("evidence_raw") or "").strip() or None,
                     source_snippet=(rco.get("source_snippet") or "").strip() or None,
-                    element_hash=content_hash,
+                    element_hash=hash_by_idx.get(idx) or _hash_text(rec_text),
                     created_at=created_at,
                 )
                 stored += 1
@@ -1221,6 +1447,7 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
                 pass
 
     return stored
+
 
 
 # ---------------- Guideline metadata extraction ----------------
