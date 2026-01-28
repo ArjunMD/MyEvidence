@@ -1,5 +1,6 @@
 import re
 import html
+import hashlib
 from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
@@ -266,7 +267,7 @@ def gpt_generate_meta_combined(
     guideline_ids = [g.strip() for g in (guideline_ids or []) if g and g.strip()]
     if not pmids and not guideline_ids:
         return ""
-    # Build blocks for studies``
+    # Build blocks for studies
     blocks: List[str] = []
     idx = 1
     for p in pmids:
@@ -323,7 +324,7 @@ def gpt_generate_meta_combined(
             "- Mention key limitations that are explicitly apparent without overreaching.",
             "- Output must be a single paragraph (no bullets, no headings).",
             "- When making a substantive claim, cite the source label(s) in parentheses (e.g., STUDY 2; GUIDELINE 5).",
-            "- Tone: Clinical, professional.",
+            "- Tone: Clear and organized",
         ]
     )
     # Add additional orientation instructions
@@ -1255,20 +1256,84 @@ elif page == "Guidelines (PDF Upload)":
     st.title("📄 Guidelines — Upload PDF")
     st.caption("Upload PDFs, then extract recommendations.")
 
+    # ---- One-button flow: Upload → Save → Extract metadata → Extract recommendations ----
     up = st.file_uploader("Upload a guideline PDF", type=["pdf"], accept_multiple_files=False)
     if up is not None:
         pdf_bytes = up.getvalue()
         size_mb = (len(pdf_bytes) / (1024 * 1024)) if pdf_bytes else 0.0
         st.write(f"**Selected:** {up.name}  \n**Size:** {size_mb:.2f} MB")
 
-        if st.button("Save PDF", type="primary", width="stretch"):
+        confirm_run = st.checkbox(
+            "Confirm: store this PDF and run extraction (metadata + recommendations)",
+            key="guidelines_confirm_upload_extract",
+        )
+        overwrite_existing = st.checkbox(
+            "If this guideline already has recommendations, overwrite (clear then re-extract)",
+            value=False,
+            key="guidelines_overwrite_existing_recs",
+        )
+
+        if st.button("Upload + Extract", type="primary", width="stretch", disabled=not confirm_run, key="guidelines_upload_extract_btn"):
             try:
-                rec = save_guideline_pdf(up.name, pdf_bytes)
-                st.session_state["guidelines_last_saved"] = rec.get("guideline_id") or ""
-                st.success(f"Saved guideline PDF. ID: `{rec.get('guideline_id','')}`")
+                with st.spinner("Saving PDF…"):
+                    rec = save_guideline_pdf(up.name, pdf_bytes)
+                gid_saved = (rec.get("guideline_id") or "").strip()
+                if not gid_saved:
+                    st.error("Save succeeded but returned no guideline_id.")
+                    st.stop()
+
+                # Extract metadata
+                extracted_meta: Dict[str, str] = {}
+                try:
+                    with st.spinner("Extracting metadata (name/year/specialty)…"):
+                        outm = extract_and_store_guideline_metadata_azure(gid_saved)
+                    if isinstance(outm, dict):
+                        extracted_meta = {
+                            "gid": gid_saved,
+                            "name": str(outm.get("guideline_name") or "").strip(),
+                            "year": str(outm.get("pub_year") or "").strip(),
+                            "spec": str(outm.get("specialty") or "").strip(),
+                        }
+                except Exception:
+                    extracted_meta = {}
+
+                # Recommendations: check existing
+                existing_now = list_guideline_recommendations(gid_saved)
+                if existing_now and overwrite_existing:
+                    # Clear then re-extract
+                    with st.spinner(f"Clearing {len(existing_now)} existing recommendations…"):
+                        for r in existing_now:
+                            rec_id = (r.get("rec_id") or "").strip()
+                            if rec_id:
+                                delete_guideline_recommendation(rec_id=rec_id)
+                    existing_now = []
+
+                n_recs = 0
+                if existing_now and not overwrite_existing:
+                    st.info("This guideline already has extracted recommendations; skipping extraction.")
+                else:
+                    prog = st.progress(0)
+                    status = st.empty()
+
+                    def _cb(done, total):
+                        if total <= 0:
+                            return
+                        prog.progress(min(1.0, max(0.0, done / float(total))))
+                        status.write(f"Processing candidate {done} / {total} …")
+
+                    with st.spinner("Extracting recommendations…"):
+                        n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, progress_cb=_cb)
+
+                # Set default selection + pending meta to prefill widgets
+                st.session_state["guidelines_last_saved"] = gid_saved
+                if extracted_meta:
+                    st.session_state["guideline_meta_pending"] = extracted_meta
+
+                st.success(f"Done. Guideline ID: `{gid_saved}` • Stored recommendations: {n_recs if n_recs else '—'}")
                 st.rerun()
+
             except Exception as e:
-                st.error(f"Failed to save: {e}")
+                st.error(f"Upload/extract failed: {e}")
 
     st.divider()
 
@@ -1376,9 +1441,75 @@ elif page == "Guidelines (PDF Upload)":
     existing = list_guideline_recommendations(gid)
     st.caption(f"Currently stored: **{len(existing)}** recommendations")
 
+    # ---- Inline maintenance to avoid leaving the page ----
+    if existing:
+        with st.expander("Maintenance", expanded=False):
+            confirm_clear = st.checkbox(
+                "Confirm delete ALL extracted recommendations for this guideline",
+                key=f"confirm_clear_recs_{gid}",
+            )
+            if st.button(
+                "Clear recommendations",
+                type="secondary",
+                use_container_width=True,
+                disabled=not confirm_clear,
+                key=f"btn_clear_recs_{gid}",
+            ):
+                try:
+                    n_deleted = 0
+                    for r in existing:
+                        rec_id = (r.get("rec_id") or "").strip()
+                        if rec_id:
+                            delete_guideline_recommendation(rec_id=rec_id)
+                            n_deleted += 1
+                    st.success(f"Cleared {n_deleted} recommendations.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Clear failed: {e}")
+
     already_extracted = len(existing) > 0
     if already_extracted:
-        st.info("Recommendations already extracted for this PDF. To re-run, delete/clear existing recommendations first.")
+        st.info("Recommendations already extracted for this PDF.")
+        with st.expander("Re-extract (overwrite)", expanded=False):
+            re_confirm = st.checkbox(
+                "Confirm overwrite: clear existing recommendations and re-run extraction",
+                key=f"confirm_reextract_{gid}",
+            )
+            if st.button(
+                "Re-extract recommendations now",
+                type="primary",
+                use_container_width=True,
+                disabled=not re_confirm,
+                key=f"reextract_recs_{gid}",
+            ):
+                prog = st.progress(0)
+                status = st.empty()
+
+                def _cb(done, total):
+                    if total <= 0:
+                        return
+                    prog.progress(min(1.0, max(0.0, done / float(total))))
+                    status.write(f"Processing candidate {done} / {total} …")
+
+                try:
+                    with st.spinner(f"Clearing {len(existing)} existing recommendations…"):
+                        for r in existing:
+                            rec_id = (r.get("rec_id") or "").strip()
+                            if rec_id:
+                                delete_guideline_recommendation(rec_id=rec_id)
+
+                    with st.spinner("Extracting…"):
+                        try:
+                            if not (chosen.get("guideline_name") or "").strip() or not (chosen.get("pub_year") or "").strip() or not (chosen.get("specialty") or "").strip():
+                                extract_and_store_guideline_metadata_azure(gid)
+                        except Exception:
+                            pass
+
+                        n = extract_and_store_guideline_recommendations_azure(gid, progress_cb=_cb)
+                    st.success(f"Stored {n} recommendations.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
     if st.button(
         "Extract recommendations now",
@@ -1418,7 +1549,7 @@ elif page == "Guidelines (PDF Upload)":
         st.info("No recommendations extracted yet.")
         st.stop()
 
-    st.subheader("Recommendation list")
+    st.subheader("Recommendation review (unreviewed)")
 
     def _merge_into_one_string(rec_text: str, strength: str, evidence: str) -> str:
         t = (rec_text or "").strip()
@@ -1443,24 +1574,61 @@ elif page == "Guidelines (PDF Upload)":
         st.info("No unreviewed recommendations.")
         st.stop()
 
-    for r in unreviewed:
+    # ---- Paging + bulk actions to reduce clicks ----
+    page_key = f"rec_review_page_{gid}"
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+
+    page_size = st.number_input(
+        "Show per page",
+        min_value=5,
+        max_value=200,
+        value=25,
+        step=5,
+        key=f"rec_review_pagesize_{gid}",
+    )
+
+    total = len(unreviewed)
+    max_page = max(0, (total - 1) // int(page_size))
+    cur_page = int(st.session_state[page_key])
+    cur_page = max(0, min(cur_page, max_page))
+    st.session_state[page_key] = cur_page
+
+    nav1, nav2, nav3 = st.columns([1, 1, 2], gap="small")
+    with nav1:
+        if st.button("◀ Prev", disabled=(cur_page <= 0), key=f"rec_prev_{gid}"):
+            st.session_state[page_key] = cur_page - 1
+            st.rerun()
+    with nav2:
+        if st.button("Next ▶", disabled=(cur_page >= max_page), key=f"rec_next_{gid}"):
+            st.session_state[page_key] = cur_page + 1
+            st.rerun()
+    with nav3:
+        st.caption(f"Showing page {cur_page + 1} / {max_page + 1} — {total} unreviewed")
+
+    start = cur_page * int(page_size)
+    shown = unreviewed[start : start + int(page_size)]
+    shown_rec_ids: List[str] = []
+
+    for r in shown:
         rec_id = (r.get("rec_id") or "").strip()
         if not rec_id:
             continue
 
-        idx = (r.get("idx") or "").strip()
         default_text = _merge_into_one_string(
             (r.get("recommendation_text") or "").strip(),
             (r.get("strength_raw") or "").strip(),
             (r.get("evidence_raw") or "").strip(),
         )
 
+        shown_rec_ids.append(rec_id)
+
         with st.container(border=True):
             c_text, c_keep, c_remove, c_delete = st.columns([8, 1, 1, 1], gap="large")
 
             with c_text:
                 st.text_area(
-                    label=f"Recommendation".strip(),
+                    label="Recommendation",
                     value=default_text,
                     height=90,
                     key=f"rec_text_{gid}_{rec_id}",
@@ -1490,6 +1658,29 @@ elif page == "Guidelines (PDF Upload)":
                         st.rerun()
                     except Exception as e:
                         st.error(f"Delete failed: {e}")
+
+    st.markdown("##### Bulk actions (this page)")
+    b1, b2 = st.columns([1, 1], gap="large")
+
+    with b1:
+        if st.button("Keep ALL shown", type="primary", use_container_width=True, key=f"bulk_keep_{gid}_{cur_page}"):
+            try:
+                for rec_id in shown_rec_ids:
+                    new_text = (st.session_state.get(f"rec_text_{gid}_{rec_id}") or "").strip()
+                    if new_text:
+                        mark_guideline_recommendation_relevant(rec_id=rec_id, recommendation_text=new_text)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Bulk keep failed: {e}")
+
+    with b2:
+        if st.button("Remove ALL shown", type="secondary", use_container_width=True, key=f"bulk_remove_{gid}_{cur_page}"):
+            try:
+                for rec_id in shown_rec_ids:
+                    mark_guideline_recommendation_irrelevant(rec_id=rec_id)
+                st.rerun()
+            except Exception as e:
+                st.error(f"Bulk remove failed: {e}")
 
 
 # =======================
@@ -1703,7 +1894,7 @@ elif page == "Generate meta":
                         mode=mode_key,
                         prompt_text=prompt_text,
                         include_abstract=include_abstract,
-                        tone="Clinical, professional",
+                        tone="Clear and organized",
                     )
                     st.session_state["meta_last_output"] = out
                 except Exception as e:
