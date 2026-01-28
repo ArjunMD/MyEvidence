@@ -512,9 +512,10 @@ def gpt_extract_specialty(title: str, abstract: str) -> str:
         "Return a comma-separated list of specialty names (or an empty string if unclear).\n"
         "Rules:\n"
         "- Output MUST be ONLY the comma-separated specialties on one line (no extra text).\n"
+        "- You must restrict your choice to the following specialties: Cardiology, Endocrinology, Gastroenterology, Hematology, Infectious Disease, Nephrology, Neurology, Oncology, Pulmonology, Rheumatology, Critical Care, Emergency Medicine, Surgery, Obstetrics and Gynecology, Psychiatry, Dermatology, Ophthalmology, Otolaryngology, Urology, Orthopedics.\n"
         "- You may return multiple specialties if truly relevant.\n"
         "- Do not invent specialties; use only what is explicitly stated or strongly implied.\n"
-        "- Keep it concise (prefer 1–3; max 5)."
+        "- Keep it concise (max 2)."
     )
 
     payload = {

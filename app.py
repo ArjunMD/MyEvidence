@@ -729,6 +729,13 @@ if page == "PMID → Abstract":
 
             st.divider()
 
+            serr = (st.session_state.get("gpt_specialty_error") or "").strip()
+            if serr:
+                st.error(serr)
+            st.text_input("Specialty", key="specialty_input", placeholder="e.g., Infectious Disease, Critical Care")
+
+            st.divider()
+
             err = (st.session_state.get("gpt_patient_n_error") or "").strip()
             if err:
                 st.error(err)
@@ -781,14 +788,6 @@ if page == "PMID → Abstract":
                 placeholder="- Primary outcome: ... (effect estimate, CI)\n- Secondary outcome: ...",
                 height=200,
             )
-
-            st.divider()
-
-            serr = (st.session_state.get("gpt_specialty_error") or "").strip()
-            if serr:
-                st.error(serr)
-            st.text_input("Specialty", key="specialty_input", placeholder="e.g., Infectious Disease, Critical Care")
-
 
 # =======================
 # Page: DB Search
@@ -1094,7 +1093,7 @@ elif page == "DB Browse":
                             meta = ", ".join(meta_bits)
 
                             if concl:
-                                st.caption(f"Author's conclusion: {concl}{f' ({meta})' if meta else ''}")
+                                st.caption(f"{concl}{f' ({meta})' if meta else ''}")
                             elif meta:
                                 st.caption(f"({meta})")
 
@@ -1143,7 +1142,7 @@ elif page == "DB Browse":
                     meta = ", ".join(meta_bits)
 
                     if concl:
-                        st.caption(f"Author's conclusion: {concl}{f' ({meta})' if meta else ''}")
+                        st.caption(f"{concl}{f' ({meta})' if meta else ''}")
                     elif meta:
                         st.caption(f"({meta})")
 
