@@ -7,6 +7,7 @@ import requests
 import streamlit as st
 
 from pathlib import Path
+from urllib.parse import quote_plus  # ✅ added
 
 
 from db import (
@@ -210,7 +211,7 @@ def _pack_guideline_for_meta(gid: str, idx: int, max_recs: int = 10) -> str:
         header_bits.append(year)
     if spec:
         header_bits.append(spec)
-    header = f"{idx}. " + " • ".join(header_bits) 
+    header = f"{idx}. " + " • ".join(header_bits)
     # Collect recommendations
     recs = list_guideline_recommendations(gid)
     lines: List[str] = []
@@ -374,6 +375,64 @@ def gpt_generate_meta_combined(
 st.set_page_config(page_title="PMID → Abstract", page_icon="📄", layout="wide")
 ensure_schema()
 ensure_guidelines_schema()
+
+# ---------------- DB Browse → DB Search deep-links ----------------  ✅ added
+
+def _qp_first(qp: dict, key: str) -> str:
+    v = qp.get(key)
+    if isinstance(v, list):
+        return v[0] if v else ""
+    return str(v) if v is not None else ""
+
+def _get_query_params() -> dict:
+    try:
+        return dict(st.query_params)  # Streamlit newer API
+    except Exception:
+        try:
+            return st.experimental_get_query_params()  # older API
+        except Exception:
+            return {}
+
+def _clear_query_params() -> None:
+    try:
+        st.query_params.clear()
+    except Exception:
+        try:
+            st.experimental_set_query_params()
+        except Exception:
+            pass
+
+def _browse_search_link(*, pmid: str = "", gid: str = "") -> str:
+    """
+    Tiny icon link that deep-links to DB Search and opens a specific record.
+    """
+    if pmid:
+        return (
+            f"<a href='?pmid={quote_plus(pmid)}' target='_self' title='Open in DB Search' "
+            f"style='text-decoration:none; opacity:0.45; margin-left:0.35rem; font-size:0.9em;'>🔎</a>"
+        )
+    if gid:
+        return (
+            f"<a href='?gid={quote_plus(gid)}' target='_self' title='Open in DB Search' "
+            f"style='text-decoration:none; opacity:0.45; margin-left:0.35rem; font-size:0.9em;'>🔎</a>"
+        )
+    return ""
+
+# If URL has ?pmid=... or ?gid=..., route into DB Search and open that item once
+_qp = _get_query_params()
+_open_pmid = _clean_pmid(_qp_first(_qp, "pmid"))
+_open_gid = (_qp_first(_qp, "gid") or "").strip()
+
+if _open_pmid or _open_gid:
+    st.session_state["nav_page"] = "DB Search"
+    if _open_pmid:
+        st.session_state["db_search_open_pmid"] = _open_pmid
+        st.session_state.pop("db_search_open_gid", None)
+    if _open_gid:
+        st.session_state["db_search_open_gid"] = _open_gid
+        st.session_state.pop("db_search_open_pmid", None)
+    _clear_query_params()
+
 
 page = st.sidebar.radio(
     "Navigate",
@@ -795,27 +854,50 @@ if page == "PMID → Abstract":
 elif page == "DB Search":
     st.title("📚 Database")
 
+    # ✅ deep-link open support
+    forced_selected: Optional[Dict[str, str]] = None
+    open_pmid = (st.session_state.get("db_search_open_pmid") or "").strip()
+    open_gid = (st.session_state.get("db_search_open_gid") or "").strip()
+
+    if open_pmid:
+        forced_selected = {"type": "paper", "pmid": open_pmid}
+    elif open_gid:
+        forced_selected = {"type": "guideline", "guideline_id": open_gid}
+
     q = st.text_input(
         "Search",
         placeholder="Search anything (title, abstract text, intervention, journal, etc)…",
         key="db_search_any",
     )
 
-    if not (q or "").strip():
-        st.stop()
-
-    paper_rows = search_records(limit=SEARCH_MAX_DEFAULT, q=q)
-    guideline_rows = search_guidelines(limit=SEARCH_MAX_DEFAULT, q=q)
+    # If user starts typing, stop forcing the opened item
+    if (q or "").strip():
+        st.session_state.pop("db_search_open_pmid", None)
+        st.session_state.pop("db_search_open_gid", None)
+        forced_selected = None
 
     rows: List[Dict[str, str]] = []
-    rows.extend(guideline_rows)
-    rows.extend(paper_rows)
+    selected: Optional[Dict[str, str]] = None
 
-    if not rows:
-        st.warning("No matches.")
+    if (q or "").strip():
+        paper_rows = search_records(limit=SEARCH_MAX_DEFAULT, q=q)
+        guideline_rows = search_guidelines(limit=SEARCH_MAX_DEFAULT, q=q)
+
+        rows.extend(guideline_rows)
+        rows.extend(paper_rows)
+
+        if not rows:
+            st.warning("No matches.")
+            st.stop()
+
+        selected = st.selectbox("Results", options=rows, format_func=_fmt_search_item, index=0)
+
+    elif forced_selected:
+        selected = forced_selected
+
+    else:
+        st.info("Type to search.")
         st.stop()
-
-    selected = st.selectbox("Results", options=rows, format_func=_fmt_search_item, index=0)
 
     if (selected.get("type") or "") != "guideline":
         selected_pmid = selected["pmid"]
@@ -923,13 +1005,6 @@ elif page == "DB Search":
             st.caption(" • ".join(bits))
 
         counts = guideline_rec_counts(gid)
-        # m1, m2, m3 = st.columns(3, gap="large")
-        # with m1:
-        #     st.metric("Relevant", str(counts.get("relevant", 0)))
-        # with m2:
-        #     st.metric("Unreviewed", str(counts.get("unreviewed", 0)))
-        # with m3:
-        #     st.metric("Irrelevant", str(counts.get("irrelevant", 0)))
 
         st.divider()
 
@@ -1076,12 +1151,25 @@ elif page == "DB Browse":
                     for it in years_map.get(y, []):
                         if (it.get("type") or "") == "guideline":
                             title = (it.get("title") or "").strip() or "(no name)"
-                            st.markdown(f"- {title}")
+                            gid = (it.get("guideline_id") or "").strip()
+                            safe_title = html.escape(title)
+                            if gid:
+                                st.markdown(f"- {safe_title}{_browse_search_link(gid=gid)}", unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"- {safe_title}", unsafe_allow_html=True)
                         else:
                             pmid = it.get("pmid") or ""
                             title = (it.get("title") or "").strip() or "(no title)"
                             concl = (it.get("authors_conclusions") or "").strip()
-                            st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
+
+                            pub_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                            safe_title = html.escape(title)
+                            safe_pmid = html.escape(pmid)
+                            st.markdown(
+                                f"- <a href='{pub_url}' target='_blank'>{safe_title}</a> — <code>{safe_pmid}</code>{_browse_search_link(pmid=pmid)}",
+                                unsafe_allow_html=True,
+                            )
+
                             j = (it.get("journal") or "").strip()
                             pn = (it.get("patient_n") or "").strip()
 
@@ -1125,12 +1213,25 @@ elif page == "DB Browse":
             for it in rows:
                 if (it.get("type") or "") == "guideline":
                     title = (it.get("title") or "").strip() or "(no name)"
-                    st.markdown(f"- {title}")
+                    gid = (it.get("guideline_id") or "").strip()
+                    safe_title = html.escape(title)
+                    if gid:
+                        st.markdown(f"- {safe_title}{_browse_search_link(gid=gid)}", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"- {safe_title}", unsafe_allow_html=True)
                 else:
                     pmid = it.get("pmid") or ""
                     title = (it.get("title") or "").strip() or "(no title)"
                     concl = (it.get("authors_conclusions") or "").strip()
-                    st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
+
+                    pub_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                    safe_title = html.escape(title)
+                    safe_pmid = html.escape(pmid)
+                    st.markdown(
+                        f"- <a href='{pub_url}' target='_blank'>{safe_title}</a> — <code>{safe_pmid}</code>{_browse_search_link(pmid=pmid)}",
+                        unsafe_allow_html=True,
+                    )
+
                     j = (it.get("journal") or "").strip()
                     pn = (it.get("patient_n") or "").strip()
 
