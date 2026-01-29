@@ -29,11 +29,12 @@ from db import (
     list_guidelines,
     get_guideline_meta,
     list_guideline_recommendations,
-    normalize_relevance_status,
-    delete_guideline_recommendation,
     update_guideline_metadata,
     list_recent_records,
-    update_guideline_recommendation,
+    get_guideline_recommendations_display,
+    update_guideline_recommendations_display,
+
+
 )
 from extract import (
     fetch_pubmed_xml,
@@ -60,6 +61,7 @@ from extract import (
     _openai_model,
     _post_with_retries,
     _extract_output_text,
+    gpt_generate_guideline_recommendations_display,
     OPENAI_RESPONSES_URL,
 )
 
@@ -979,54 +981,39 @@ elif page == "DB Search":
         gid = (selected.get("guideline_id") or "").strip()
         meta = get_guideline_meta(gid) or {}
         title = (meta.get("guideline_name") or "").strip() or (meta.get("filename") or "").strip() or (selected.get("title") or "")
-        year = (meta.get("pub_year") or "").strip() or (selected.get("year") or "")
-        spec = (meta.get("specialty") or "").strip() or (selected.get("specialty") or "")
+        # st.subheader(f"📘 {title}")
 
-        st.subheader(f"📘 {title}")
-
-        bits = [b for b in [year, spec] if b]
-        if bits:
-            st.caption(" • ".join(bits))
+        # # Show guideline metadata (optional)
+        # bits = []
+        # y = (meta.get("pub_year") or "").strip()
+        # s = (meta.get("specialty") or "").strip()
+        # if y:
+        #     bits.append(y)
+        # if s:
+        #     bits.append(s)
+        # if bits:
+        #     st.caption(" • ".join(bits))
 
         st.divider()
 
-        rec_filter = st.selectbox(
-            "Show",
-            ["Active", "Passive", "Unreviewed","All"],
-            index=0,
-            key=f"guideline_view_filter_{gid}",
-        )
-
-        recs_all = list_guideline_recommendations(gid)
-
-        active = [r for r in recs_all if normalize_relevance_status(r.get("relevance_status") or "") == "active"]
-        passive = [r for r in recs_all if normalize_relevance_status(r.get("relevance_status") or "") == "passive"]
-        unreviewed = [r for r in recs_all if normalize_relevance_status(r.get("relevance_status") or "") == "unreviewed"]
-
-
-        def _render_status_list(items: List[Dict[str, str]]) -> None:
-            if not items:
-                st.info("None.")
-                return
-            for r in items:
-                txt = (r.get("recommendation_text") or "").strip()
-                if txt:
-                    st.markdown(f"- {txt}")
-
-        if rec_filter == "Active":
-            _render_status_list(active)
-        elif rec_filter == "Passive":
-            _render_status_list(passive)
-        elif rec_filter == "Unreviewed":
-            _render_status_list(unreviewed)
+        # Clinician-friendly recommendations display (read-only)
+        disp = (get_guideline_recommendations_display(gid) or "").strip()
+        if disp:
+            st.markdown(disp)
         else:
-            st.markdown("### Active")
-            _render_status_list(active)
-            st.markdown("### Passive")
-            _render_status_list(passive)
-            st.markdown("### Unreviewed")
-            _render_status_list(unreviewed)
+            st.info("No clinician-friendly recommendations display saved for this guideline yet.")
+            recs = list_guideline_recommendations(gid)
+            if recs and st.button("Generate recommendations display", type="primary", width="stretch", key=f"dbsearch_guideline_gen_{gid}"):
+                try:
+                    with st.spinner("Generating…"):
+                        new_md = gpt_generate_guideline_recommendations_display(recs, meta)
+                    update_guideline_recommendations_display(gid, new_md)
+                    st.success("Generated.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
+ 
 
 # =======================
 # Page: DB Browse
@@ -1222,6 +1209,21 @@ elif page == "Guidelines (PDF Upload)":
                 if extracted_meta:
                     st.session_state["guideline_meta_pending"] = extracted_meta
 
+                # ----  Generate clinician-friendly recommendations display once ----
+                try:
+                    existing_disp = (get_guideline_recommendations_display(gid_saved) or "").strip()
+                    if not existing_disp:
+                        recs_now = list_guideline_recommendations(gid_saved)
+                        if recs_now:
+                            meta_now = get_guideline_meta(gid_saved) or {}
+                            with st.spinner("Generating clinician-friendly recommendations display…"):
+                                disp_md = gpt_generate_guideline_recommendations_display(recs_now, meta_now)
+                            update_guideline_recommendations_display(gid_saved, disp_md)
+                except Exception:
+                    # Best-effort; don't fail upload flow if display generation fails
+                    pass
+
+
                 st.success(f"Done. Guideline ID: `{gid_saved}` • Stored recommendations: {n_recs if n_recs else '—'}")
                 st.rerun()
 
@@ -1330,123 +1332,58 @@ elif page == "Guidelines (PDF Upload)":
 
     st.subheader("Recommendation review")
 
-    def _merge_into_one_string(rec_text: str, strength: str, evidence: str) -> str:
-        t = (rec_text or "").strip()
-        s = (strength or "").strip()
-        e = (evidence or "").strip()
-        if not t:
-            return ""
-        bits3 = [x for x in [s, e] if x]
-        if not bits3:
-            return t
-        low = t.lower()
-        if (s and s.lower() in low) or (e and e.lower() in low):
-            return t
-        return f"{t} ({'; '.join(bits3)})"
+     # =======================
+    # Clinician-friendly display (editable)
+    # =======================
+    st.markdown("##### Clinician-friendly recommendations display (editable)")
 
-    def _status_norm(r: Dict[str, str]) -> str:
-        return normalize_relevance_status(r.get("relevance_status") or "")
+    # Load display into session state when guideline changes
+    if st.session_state.get("guideline_display_loaded_gid") != gid:
+        st.session_state["guideline_display_loaded_gid"] = gid
+        st.session_state["guideline_display_md"] = get_guideline_recommendations_display(gid) or ""
 
-    def _status_label(s: str) -> str:
-        if s == "active":
-            return "Active"
-        if s == "passive":
-            return "Passive"
-        return "Unreviewed"
+    disp_current = (st.session_state.get("guideline_display_md") or "").strip()
+    if not disp_current:
+        st.info("No generated display yet. Click **Generate** to create one from extracted recommendations.")
 
-    def _idx_key(r: Dict[str, str]) -> Tuple[int, int, str]:
-        v = str(r.get("idx") or "").strip()
-        if v.isdigit():
-            return (0, int(v), "")
-        return (1, 10**9, v)
+    st.text_area(
+        "Display (Markdown)",
+        key="guideline_display_md",
+        height=520,
+        placeholder="Click Generate to create a sectioned, clinician-friendly display. You can then edit freely and Save.",
+    )
 
-    shown = sorted(recs, key=_idx_key)
+    cA, cB, cC = st.columns([1, 1, 2], gap="large")
 
-    shown_rec_ids: List[str] = []
-    icon_map = {"active": "🟢", "passive": "🟡", "unreviewed": "⚪"}
+    with cA:
+        if st.button("Save display", type="primary", width="stretch", key=f"guideline_disp_save_{gid}"):
+            try:
+                update_guideline_recommendations_display(gid, st.session_state.get("guideline_display_md") or "")
+                st.success("Display saved.")
+            except Exception as e:
+                st.error(str(e))
 
-    total_recs = len(shown)
+    with cB:
+        if st.button("Generate / Regenerate", type="secondary", width="stretch", key=f"guideline_disp_regen_{gid}"):
+            try:
+                meta_now = get_guideline_meta(gid) or {}
+                with st.spinner("Generating…"):
+                    new_md = gpt_generate_guideline_recommendations_display(recs, meta_now)
+                st.session_state["guideline_display_md"] = new_md
+                update_guideline_recommendations_display(gid, new_md)
+                st.success("Generated.")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
 
-    for rec_num, r in enumerate(shown, start=1):
-        rec_id = (r.get("rec_id") or "").strip()
-        if not rec_id:
-            continue
+    with cC:
+        with st.expander("Preview (read-only)", expanded=False):
+            preview_md = (st.session_state.get("guideline_display_md") or "").strip()
+            if preview_md:
+                st.markdown(preview_md)
+            else:
+                st.markdown("—")
 
-        shown_rec_ids.append(rec_id)
-
-        status = _status_norm(r)
-        icon = icon_map.get(status, "•")
-
-        default_text = _merge_into_one_string(
-            (r.get("recommendation_text") or "").strip(),
-            (r.get("strength_raw") or "").strip(),
-            (r.get("evidence_raw") or "").strip(),
-        )
-
-        strength = (r.get("strength_raw") or "").strip()
-        evidence = (r.get("evidence_raw") or "").strip()
-        se_bits = [b for b in [strength, evidence] if b]
-
-        ta_key = f"rec_text_{gid}_{rec_id}"
-
-        with st.container(border=True):
-            label = f"{icon} Recommendation {rec_num}/{total_recs} — Status: {_status_label(status)}"
-            st.text_area(
-                label=label,          # ✅ all the info lives here now
-                value=default_text,
-                height=110,
-                key=ta_key,
-            )
-            
-            # NOTE: No "Unreview" button. Unreviewed is default-only from extraction.
-            b_save, b_act, b_pas, b_del = st.columns([1, 1, 1, 1], gap="small")
-
-            def _current_text() -> str:
-                return (st.session_state.get(ta_key) or "").strip()
-
-            with b_save:
-                if st.button("Save text (if changed)", type="primary", use_container_width=True, key=f"rec_save_{gid}_{rec_id}"):
-                    try:
-                        update_guideline_recommendation(rec_id=rec_id, recommendation_text=_current_text())
-                        try:
-                            st.toast("Saved.")
-                        except Exception:
-                            st.success("Saved.")
-                    except Exception as e:
-                        st.error(f"Save failed: {e}")
-
-            with b_act:
-                if st.button("Active", type="secondary", use_container_width=True, key=f"rec_act_{gid}_{rec_id}"):
-                    try:
-                        update_guideline_recommendation(
-                            rec_id=rec_id,
-                            recommendation_text=_current_text(),
-                            relevance_status="active",
-                            clear_strength_evidence=True,
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Mark active failed: {e}")
-
-            with b_pas:
-                if st.button("Passive", type="secondary", use_container_width=True, key=f"rec_pas_{gid}_{rec_id}"):
-                    try:
-                        update_guideline_recommendation(
-                            rec_id=rec_id,
-                            recommendation_text=_current_text(),
-                            relevance_status="passive",
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Mark passive failed: {e}")
-
-            with b_del:
-                if st.button("Delete", type="secondary", use_container_width=True, key=f"rec_delete_{gid}_{rec_id}"):
-                    try:
-                        delete_guideline_recommendation(rec_id=rec_id)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Delete failed: {e}")
 
 # =======================
 # Page: Generate meta
@@ -1761,53 +1698,64 @@ elif page == "Delete":
             specialty = (r.get("specialty") or "").strip()
             guidelines.append({"guideline_id": gid, "title": title, "year": year, "specialty": specialty})
 
-        if not paper_rows:
-            st.info("No saved papers found.")
-        else:
-            def _paper_label(r: Dict[str, str]) -> str:
-                pmid = (r.get("pmid") or "").strip()
-                title = (r.get("title") or "").strip()
-                year = (r.get("year") or "").strip()
-                journal = (r.get("journal") or "").strip()
-                bits = [title]
-                if year:
-                    bits.append(f"({year})")
-                if journal:
-                    bits.append(f"— {journal}")
-                return " ".join([b for b in bits if b]).strip()
+        if not guidelines:
+            st.info("No saved guidelines found.")
 
-            sel_i = st.selectbox(
-                "Select a paper",
-                list(range(len(paper_rows))),
-                format_func=lambda i: _paper_label(paper_rows[i]),
-                key="delete_paper_select_idx",
-            )
+        # Helper for guideline label.
+        def _guideline_label(r: Dict[str, str]) -> str:
+            gid = (r.get("guideline_id") or "").strip()
+            title = (r.get("title") or "").strip()
+            year = (r.get("year") or "").strip()
+            spec = (r.get("specialty") or "").strip()
+            bits = [title]
+            if year:
+                bits.append(f"({year})")
+            if spec:
+                bits.append(f"— {spec}")
+            return " ".join([b for b in bits if b]).strip()
+        
+        # --- Use stable guideline_id values (prevents None/index drift after delete/filter) ---
+        gid_options = [g["guideline_id"] for g in guidelines if (g.get("guideline_id") or "").strip()]
+        gid_to_row = {g["guideline_id"]: g for g in guidelines if (g.get("guideline_id") or "").strip()}
 
-            sel_pmid = (paper_rows[sel_i].get("pmid") or "").strip()
-            rec = get_record(sel_pmid) or {}
+        if not gid_options:
+            st.info("No saved guidelines found.")
+            st.stop()
 
-            st.write(f"**PMID:** {sel_pmid}")
-            st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
+        _state_key = "delete_guideline_selected_gid"
 
-            with st.expander("Show abstract", expanded=False):
-                abs_txt = (rec.get('abstract') or '').strip()
-                if abs_txt:
-                    st.write(abs_txt)
+        # If the previously-selected gid no longer exists (e.g., after deletion/filter), clear it
+        prev = st.session_state.get(_state_key)
+        if prev and prev not in gid_options:
+            st.session_state.pop(_state_key, None)
 
-            confirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_paper_{sel_pmid}")
-            if st.button(
-                "Delete paper",
-                type="primary",
-                width="stretch",
-                disabled=not confirm,
-                key=f"btn_delete_paper_{sel_pmid}",
-            ):
-                try:
-                    delete_record(sel_pmid)
-                    st.success("Deleted paper.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+        sel_gid = st.selectbox(
+            "Select a guideline",
+            options=gid_options,
+            format_func=lambda gid: _guideline_label(gid_to_row.get(gid, {"guideline_id": gid, "title": gid, "year": "", "specialty": ""})),
+            key=_state_key,
+        )
+
+        meta = get_guideline_meta(sel_gid) or {}
+
+
+        st.write(f"**Filename:** {(meta.get('filename') or '').strip()}")
+        st.write(f"**Uploaded:** {(meta.get('uploaded_at') or '').strip()}")
+
+        gconfirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_guideline_{sel_gid}")
+        if st.button(
+            "Delete guideline",
+            type="primary",
+            width="stretch",
+            disabled=not gconfirm,
+            key=f"btn_delete_guideline_{sel_gid}",
+        ):
+            try:
+                delete_guideline(sel_gid)
+                st.success("Deleted guideline.")
+                st.rerun()
+            except Exception as e:
+                st.error(str(e))
 
 # =======================
 # Page: About

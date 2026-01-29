@@ -1,5 +1,4 @@
 # extract.py
-import os
 import re
 import time
 import random
@@ -47,10 +46,6 @@ NCBI_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
 GUIDELINE_ELEMENT_MAX_CHARS = 4500
-GUIDELINE_CANDIDATE_MAX = 250
-
-GUIDELINE_OPENAI_BATCH_SIZE = 20  # OpenAI decides which candidates are true recommendations
-GUIDELINE_OPENAI_MAX_CHARS_PER_ITEM = 1800
 
 GUIDELINE_OPENAI_STRICTNESS = "medium"  # "strict" | "medium" | "loose"
 
@@ -552,6 +547,235 @@ def _extract_output_text(resp_json: Dict) -> str:
             if isinstance(c, dict) and c.get("type") == "output_text" and isinstance(c.get("text"), str):
                 parts.append(c["text"])
     return "\n".join(parts).strip()
+
+# ---------------- Guideline clinician-friendly display (sectioned) ----------------
+
+_GUIDELINE_SECTION_CHOICES = [
+    "Diagnosis",
+    "Initial evaluation",
+    "Risk stratification",
+    "Management",
+    "Pharmacologic therapy",
+    "Non-pharmacologic management",
+    "Procedures / interventions",
+    "Monitoring for complications",
+    "Follow up",
+    "Referrals",
+    "Prevention",
+    "Patient education",
+    "Special populations",
+    "Disposition",
+    "Contraindications / Avoid",
+    "Other",
+]
+
+_GUIDELINE_SECTION_ORDER = {name: i for i, name in enumerate(_GUIDELINE_SECTION_CHOICES, start=1)}
+
+
+def _safe_section_label(s: str) -> str:
+    lab = (s or "").strip()
+    if not lab:
+        return "Other"
+    # keep short to avoid weird headings
+    lab = re.sub(r"\s{2,}", " ", lab).strip()
+    if len(lab) > 80:
+        lab = lab[:80].rstrip() + "…"
+    return lab
+
+
+def _extract_bracket_path(source_snippet: str) -> str:
+    """
+    source_snippet often looks like: "[Heading > Path] excerpt..."
+    Return just the bracket path if present.
+    """
+    s = (source_snippet or "").strip()
+    m = re.match(r"^\[([^\]]{1,220})\]\s*(.*)$", s)
+    if not m:
+        return ""
+    return (m.group(1) or "").strip()
+
+
+def _chunk_recs_for_classification(items: List[Dict], max_chars: int = 14000, max_items: int = 45) -> List[List[Dict]]:
+    """
+    Chunk items so each OpenAI call stays bounded.
+    We classify using truncated rec text; full text is rendered later (guarantees completeness).
+    """
+    chunks: List[List[Dict]] = []
+    cur: List[Dict] = []
+    cur_chars = 0
+
+    for it in items:
+        text = (it.get("text") or "")
+        blob = f"{it.get('i')}. {text}"
+        # start new chunk if needed
+        if cur and (len(cur) >= max_items or (cur_chars + len(blob) > max_chars)):
+            chunks.append(cur)
+            cur = []
+            cur_chars = 0
+        cur.append(it)
+        cur_chars += len(blob)
+
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _parse_json_from_model(raw: str) -> Dict:
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except Exception:
+        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
+        if not m:
+            return {}
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            return {}
+
+
+def gpt_generate_guideline_recommendations_display(recs: List[Dict[str, str]], meta: Optional[Dict[str, str]] = None) -> str:
+    """
+    Produces markdown with clinician-friendly sections, containing EVERY recommendation.
+    OpenAI is used ONLY to classify each recommendation into a section.
+    Rendering is deterministic to guarantee nothing is dropped.
+    """
+    key = _openai_api_key()
+    if not key:
+        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+
+    meta = meta or {}
+    gname = (meta.get("guideline_name") or meta.get("filename") or "Guideline").strip()
+    gy = (meta.get("pub_year") or "").strip()
+    gspec = (meta.get("specialty") or "").strip()
+
+    # Build items in stable display order
+    items: List[Dict] = []
+    for i, r in enumerate(recs or [], start=1):
+        txt = (r.get("recommendation_text") or "").strip()
+        if not txt:
+            continue
+        # truncate only for classification
+        txt_short = txt[:1600] + ("…" if len(txt) > 1600 else "")
+        items.append(
+            {
+                "i": i,
+                "text": txt_short,
+            }
+        )
+
+    if not items:
+        return f"# {gname}\n\n_No recommendations found._"
+
+    # Classify in chunks
+    i_to_section: Dict[int, str] = {}
+
+    instructions = (
+        "You are categorizing clinical guideline recommendations into clinician-friendly sections.\n"
+        "Return ONLY valid JSON with this shape:\n"
+        "{\"items\":[{\"i\":1,\"section\":\"Diagnosis\"}, ...]}\n\n"
+        "Rules:\n"
+        "- Each input item must appear exactly once in output.\n"
+        "- section must be ONE short label. Prefer from this list:\n"
+        f"{', '.join(_GUIDELINE_SECTION_CHOICES)}\n"
+        "- If none fit, use a short custom label or 'Other'.\n"
+        "- Do NOT include any extra keys. No markdown. No commentary."
+    )
+
+    chunks = _chunk_recs_for_classification(items, max_chars=14000, max_items=45)
+    for ch in chunks:
+        payload = {
+            "model": _openai_model(),
+            "instructions": instructions,
+            "input": "INPUT_JSON:\n" + json.dumps({"items": ch}, ensure_ascii=False) + "\n\nReturn JSON now.",
+            "text": {"verbosity": "low"},
+            "max_output_tokens": 1200,
+            "temperature": 0,
+            "reasoning": {"effort": "none"},
+            "store": False,
+        }
+        r = _post_with_retries(
+            OPENAI_RESPONSES_URL,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=60,
+        )
+        r.raise_for_status()
+        obj = _parse_json_from_model(_extract_output_text(r.json()))
+        out_items = obj.get("items") if isinstance(obj, dict) else None
+        if not isinstance(out_items, list):
+            out_items = []
+
+        for oi in out_items:
+            if not isinstance(oi, dict):
+                continue
+            try:
+                ii = int(oi.get("i"))
+            except Exception:
+                continue
+            sec = _safe_section_label(oi.get("section") or "")
+            i_to_section[ii] = sec
+
+    # Render ALL recommendations deterministically (full text + strength/evidence/source)
+    # Note: recs list already matches the i-order we used above (minus empty-text drops)
+    enriched: List[Dict] = []
+    ii = 0
+    for r in recs or []:
+        txt = (r.get("recommendation_text") or "").strip()
+        if not txt:
+            continue
+        ii += 1
+        enriched.append(
+            {
+                "i": ii,
+                "section": _safe_section_label(i_to_section.get(ii, "Other")),
+                "text": txt,
+                "strength": (r.get("strength_raw") or "").strip(),
+                "evidence": (r.get("evidence_raw") or "").strip(),
+                "path": _extract_bracket_path(r.get("source_snippet") or ""),
+            }
+        )
+
+    # Group by section
+    grouped: Dict[str, List[Dict]] = {}
+    for e in enriched:
+        grouped.setdefault(e["section"], []).append(e)
+
+    def _sec_sort_key(s: str) -> Tuple[int, str]:
+        return (_GUIDELINE_SECTION_ORDER.get(s, 10_000), s.lower())
+
+    sections_sorted = sorted(grouped.keys(), key=_sec_sort_key)
+
+    # Header
+    hdr_bits = []
+    if gy:
+        hdr_bits.append(gy)
+    if gspec:
+        hdr_bits.append(gspec)
+    hdr = f"# {gname}\n"
+    if hdr_bits:
+        hdr += f"\n_{' • '.join(hdr_bits)}_\n"
+
+    md_lines: List[str] = ["", "## Recommendations", ""]
+
+    for sec in sections_sorted:
+        md_lines.append(f"### {sec}")
+        md_lines.append("")
+        for e in grouped.get(sec, []):
+            extras: List[str] = []
+            if e["strength"]:
+                extras.append(f"Strength: {e['strength']}")
+            if e["evidence"]:
+                extras.append(f"Evidence: {e['evidence']}")
+            extra_txt = f" ({'; '.join(extras)})" if extras else ""
+            md_lines.append(f"- **Rec {e['i']}.** {e['text']}{extra_txt}")
+           # if e["path"]:
+            #    md_lines.append(f"  - _Source section:_ {e['path']}")
+        md_lines.append("")
+
+    return "\n".join(md_lines).strip()
 
 
 def _parse_nonneg_int(raw: str) -> Optional[int]:
@@ -1070,136 +1294,6 @@ def get_or_create_markdown(guideline_id: str) -> str:
     return md.strip()
 
 
-# ---------------- Guideline markdown -> elements ----------------
-
-def _split_markdown_into_elements(md: str) -> List[Dict[str, str]]:
-    text = (md or "").replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not text:
-        return []
-
-    lines = text.split("\n")
-    out: List[Dict[str, str]] = []
-    buf: List[str] = []
-
-    def flush_paragraph():
-        nonlocal buf
-        s = " ".join([b.strip() for b in buf if b.strip()]).strip()
-        buf = []
-        if s:
-            out.append({"kind": "text", "content": s})
-
-    list_re = re.compile(r"^\s*(?:[-*+]|(?:\d+[\.\)]))\s+")
-    table_sep_re = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$")
-
-    i = 0
-    while i < len(lines):
-        ln = lines[i]
-
-        if not ln.strip():
-            flush_paragraph()
-            i += 1
-            continue
-
-        if ln.lstrip().startswith("#"):
-            flush_paragraph()
-            out.append({"kind": "heading", "content": ln.strip()})
-            i += 1
-            continue
-
-        # Boxed / callout text often shows up as blockquotes in Azure DI markdown
-        if ln.lstrip().startswith(">"):
-            flush_paragraph()
-            q: List[str] = []
-            while i < len(lines) and lines[i].lstrip().startswith(">"):
-                q.append(re.sub(r"^\s*>\s?", "", lines[i]).rstrip())
-                i += 1
-            content = " ".join([x for x in q if x.strip()]).strip()
-            if content:
-                out.append({"kind": "callout", "content": content})
-            continue
-
-        # Table: header line + separator line
-        if ("|" in ln) and (i + 1 < len(lines)) and table_sep_re.match(lines[i + 1] or ""):
-            flush_paragraph()
-            header = ln.strip()
-            i += 2
-
-            rows = []
-            while i < len(lines) and lines[i].strip() and ("|" in lines[i]):
-                rows.append(lines[i].strip())
-                i += 1
-
-            for r in rows:
-                out.append({"kind": "table_row", "content": f"TABLE HEADER: {header}\nTABLE ROW: {r}"})
-            continue
-
-        # List item (+ continuation lines)
-        if list_re.match(ln):
-            flush_paragraph()
-            base = list_re.sub("", ln).strip()
-            cont: List[str] = []
-            i += 1
-
-            while i < len(lines):
-                nxt = lines[i]
-                if not nxt.strip():
-                    break
-                if nxt.lstrip().startswith("#"):
-                    break
-                if ("|" in nxt) and (i + 1 < len(lines)) and table_sep_re.match(lines[i + 1] or ""):
-                    break
-                if list_re.match(nxt):
-                    break
-
-                # continuation heuristic: only accept indented lines
-                if nxt.startswith("  ") or nxt.startswith("\t"):
-                    cont.append(nxt.strip())
-                    i += 1
-                    continue
-
-                # stop if not clearly a continuation
-                break
-
-            full = " ".join([base] + cont).strip()
-            if full:
-                out.append({"kind": "list_item", "content": full})
-            continue
-
-        buf.append(ln)
-        i += 1
-
-    flush_paragraph()
-
-    # bound element size
-    bounded: List[Dict[str, str]] = []
-    for el in out:
-        c = (el.get("content") or "").strip()
-        if not c:
-            continue
-        if len(c) <= GUIDELINE_ELEMENT_MAX_CHARS:
-            bounded.append(el)
-        else:
-            start = 0
-            while start < len(c):
-                chunk = c[start : start + GUIDELINE_ELEMENT_MAX_CHARS]
-                bounded.append({"kind": el.get("kind") or "text", "content": chunk})
-                start += GUIDELINE_ELEMENT_MAX_CHARS
-    return bounded
-
-
-def _is_candidate_reco(el_text: str) -> bool:
-    s = (el_text or "").strip()
-    if len(s) < 25:
-        return False
-    if _RECO_HINT_RE.search(s):
-        return True
-    if _LOE_HINT_RE.search(s):
-        return True
-    if re.match(r"(?i)^\s*(recommendation|statement|key recommendation)\b", s):
-        return True
-    return False
-
-
 def _hash_text(s: str) -> str:
     import hashlib
     h = hashlib.sha256()
@@ -1208,266 +1302,6 @@ def _hash_text(s: str) -> str:
 
 
 # ---------------- Guideline extraction: OpenAI recos from elements ----------------
-
-def _openai_extract_recos_from_element(element_text: str) -> List[Dict[str, str]]:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
-
-    el = (element_text or "").strip()
-    if not el:
-        return []
-
-    instructions = (
-        "You extract clinical guideline RECOMMENDATIONS from the provided text (which may be markdown or a table row).\n"
-        "Return ONLY valid JSON (no markdown) with this exact top-level shape:\n"
-        "{ \"items\": [ {\"recommendation_text\":\"...\",\"strength_raw\":\"...\",\"evidence_raw\":\"...\",\"source_snippet\":\"...\"}, ... ] }\n"
-        "Rules:\n"
-        "- Use ONLY what is explicitly in the text. Do NOT infer or guess.\n"
-        "- If no recommendation is present, return {\"items\":[]}.\n"
-        "- recommendation_text: include the FULL actionable recommendation sentence(s); do not truncate clauses.\n"
-        "- strength_raw: e.g., 'Class I', 'Strong recommendation' if explicitly stated; else empty string.\n"
-        "- evidence_raw: e.g., 'Level A', 'LOE B', 'moderate certainty' if explicitly stated; else empty string.\n"
-        "- source_snippet: short verbatim excerpt (<= 240 chars) supporting the recommendation + any grading.\n"
-        "- Strings only; never null.\n"
-    )
-
-    payload = {
-        "model": _openai_model(),
-        "instructions": instructions,
-        "input": f"TEXT:\n{el}\n\nReturn JSON now.",
-        "text": {"verbosity": "low"},
-        "max_output_tokens": 650,
-        "temperature": 0,
-        "store": False,
-    }
-
-    r = _post_with_retries(
-        OPENAI_RESPONSES_URL,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=75,
-    )
-    r.raise_for_status()
-
-    raw = (_extract_output_text(r.json()) or "").strip()
-    if not raw:
-        return []
-
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
-        if not m:
-            return []
-        try:
-            obj = json.loads(m.group(1))
-        except Exception:
-            return []
-
-    items = obj.get("items")
-    if not isinstance(items, list):
-        return []
-
-    out: List[Dict[str, str]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        rec = (it.get("recommendation_text") or "").strip()
-        if not rec:
-            continue
-        out.append(
-            {
-                "recommendation_text": rec,
-                "strength_raw": (it.get("strength_raw") or "").strip(),
-                "evidence_raw": (it.get("evidence_raw") or "").strip(),
-                "source_snippet": (it.get("source_snippet") or "").strip(),
-            }
-        )
-    return out
-
-
-def _openai_extract_recos_from_elements_batch(batch: List[Dict]) -> List[Dict[str, str]]:
-    """Batch extractor: OpenAI decides which items are *formal* guideline recommendations."""
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
-
-    if not batch:
-        return []
-
-    cand = []
-    for it in batch:
-        try:
-            idx = int(it.get("idx"))
-        except Exception:
-            continue
-        kind = (it.get("kind") or "text").strip()
-        section = (it.get("section") or "").strip()
-        text = (it.get("content") or "").strip()
-        if not text:
-            continue
-        cand.append(
-            {
-                "idx": idx,
-                "kind": kind,
-                "section": section[:120],
-                "text": text[:GUIDELINE_OPENAI_MAX_CHARS_PER_ITEM],
-            }
-        )
-
-    if not cand:
-        return []
-
-    strictness = (GUIDELINE_OPENAI_STRICTNESS or "medium").strip().lower()
-
-    if strictness == "strict":
-        instructions = """You are a STRICT extractor of *formal* clinical guideline recommendations.
-Input is a JSON array of candidate snippets from a guideline PDF.
-Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
-
-Only output items when you are confident the text is intended as an actual guideline recommendation/statement:
-- Typically appears as a list item, table row, or boxed/callout text.
-- Or explicitly labeled (e.g., 'Recommendation', 'Statement', 'Practice Point', 'Key recommendation').
-- Or contains explicit strength/grade markers (Class/Level/LOE/GRADE/etc.).
-
-Do NOT extract:
-- Background, rationale, narrative discussion, evidence summaries, methods.
-- 'Recommended daily allowance' / nutrition RDAs, reporting checklists, or 'recommended for future research'.
-- Anything that is not an actionable clinical directive.
-
-For kind='text' (plain paragraph): be EXTRA strict — only extract if it is clearly labeled as a recommendation or includes explicit grading/strength. If unsure, omit.
-
-Return ONLY valid JSON with this exact shape:
-{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
-
-Rules:
-- Use ONLY what is explicitly present in the provided text; never infer.
-- idx MUST be one of the provided idx values.
-- recommendation_text: include the full actionable recommendation sentence(s).
-- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
-- source_snippet: verbatim excerpt <= 240 chars from the candidate text.
-- Strings only (no nulls). If none qualify, return {"items":[]}"""
-    elif strictness == "loose":
-        instructions = """You extract clinical guideline recommendations with good recall (still avoid obvious false positives).
-Input is a JSON array of candidate snippets from a guideline PDF.
-Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
-
-Extract items that read like actionable guidance (directive language) even if not graded, especially when:
-- kind is list_item/table_row/callout, OR
-- section heading suggests recommendations/guidance/statements/algorithm/summary, OR
-- the snippet is short and directive.
-
-When a snippet includes rationale + recommendation, extract ONLY the directive sentence(s).
-
-Do NOT extract:
-- Recommended daily allowance / nutrition RDAs, reporting checklists, or future research recommendations.
-- Methods, literature review, background.
-
-Return ONLY valid JSON with this exact shape:
-{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
-
-Rules:
-- Use ONLY what is explicitly present in the provided text; never infer.
-- idx MUST be one of the provided idx values.
-- strength_raw/evidence_raw only if explicitly stated, else empty string.
-- source_snippet <= 240 chars.
-- If none qualify, return {"items":[]}"""
-    else:
-        instructions = """You extract clinical guideline recommendations with HIGH precision and balanced recall.
-Input is a JSON array of candidate snippets from a guideline PDF.
-Each candidate has: idx (identifier), kind (list_item/table_row/callout/text), section (nearest heading), text.
-
-A recommendation is an *actionable clinical directive* intended as guidance (for clinicians/patients).
-Prefer TRUE recommendations; skip narrative evidence summaries.
-
-Strong signals (any one can be sufficient):
-- kind is list_item, table_row, or callout (boxed text).
-- The section heading suggests recommendations/guidance/statements/algorithm/summary.
-- The text contains directive language (e.g., should, must, we recommend, do not, avoid, consider, offer, use, initiate, administer, discontinue).
-- Explicit labels (Recommendation/Statement/Practice Point/Key recommendation) or grading (Class/Level/LOE/GRADE/etc.).
-
-For kind='text' (plain paragraph): extract if BOTH are true:
-1) It contains clear directive language; AND
-2) It is either (a) under a recommendation-like section heading OR (b) explicitly labeled/graded OR (c) short and directive (roughly <= 450 characters of main directive text).
-If a paragraph mixes rationale + recommendation, extract ONLY the recommendation sentence(s) and omit rationale.
-
-Do NOT extract:
-- Background, rationale-only discussion, evidence summaries, methods.
-- 'Recommended daily allowance' / nutrition RDAs, reporting checklists, or 'recommended for future research'.
-- Vague non-directive statements ("may be beneficial") unless clearly framed as guidance.
-
-Return ONLY valid JSON with this exact shape:
-{ "items": [ {"idx":123, "recommendation_text":"...", "strength_raw":"...", "evidence_raw":"...", "source_snippet":"..."}, ... ] }
-
-Rules:
-- Use ONLY what is explicitly present in the provided text; never infer.
-- idx MUST be one of the provided idx values.
-- recommendation_text: include the full actionable recommendation sentence(s).
-- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
-- source_snippet: verbatim excerpt <= 240 chars from the candidate text.
-- Strings only (no nulls). If none qualify, return {"items":[]}"""
-
-    payload = {
-        "model": _openai_model(),
-        "instructions": instructions,
-        "input": "CANDIDATES_JSON:\n" + json.dumps(cand, ensure_ascii=False) + "\n\nReturn JSON now.",
-        "text": {"verbosity": "low"},
-        "max_output_tokens": 1400,
-        "temperature": 0,
-        "store": False,
-    }
-
-    r = requests.post(
-        OPENAI_RESPONSES_URL,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=90,
-    )
-    r.raise_for_status()
-
-    raw = (_extract_output_text(r.json()) or "").strip()
-    if not raw:
-        return []
-
-    try:
-        obj = json.loads(raw)
-    except Exception:
-        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
-        if not m:
-            return []
-        try:
-            obj = json.loads(m.group(1))
-        except Exception:
-            return []
-
-    items = obj.get("items")
-    if not isinstance(items, list):
-        return []
-
-    out: List[Dict[str, str]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        try:
-            idx = int(it.get("idx"))
-        except Exception:
-            continue
-        rec = (it.get("recommendation_text") or "").strip()
-        if not rec:
-            continue
-        out.append(
-            {
-                "idx": str(idx),
-                "recommendation_text": rec,
-                "strength_raw": (it.get("strength_raw") or "").strip(),
-                "evidence_raw": (it.get("evidence_raw") or "").strip(),
-                "source_snippet": (it.get("source_snippet") or "").strip(),
-            }
-        )
-
-    return out
-
 
 def _openai_triage_sections(sections: List[Dict[str, str]]) -> List[int]:
     """
@@ -1792,30 +1626,6 @@ def _parse_year4(raw: str) -> str:
     return ""
 
 
-def _best_year_guess_from_text(text: str) -> str:
-    t = (text or "")
-    if not t:
-        return ""
-    hits = []
-    for m in _GUIDELINE_YEAR_RE.finditer(t):
-        y = int(m.group(1))
-        pos = m.start()
-        window = t[max(0, pos - 50) : min(len(t), pos + 50)].lower()
-        score = 0
-        if "publish" in window or "publication" in window or "issued" in window or "release" in window:
-            score += 3
-        if "update" in window or "updated" in window or "revision" in window:
-            score += 2
-        if "copyright" in window or "©" in window:
-            score += 1
-        hits.append((score, y))
-    if not hits:
-        return ""
-    hits.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    best = hits[0][1]
-    return str(best) if 1900 <= best <= (datetime.now().year + 1) else ""
-
-
 def _guideline_meta_snippet(md: str, max_chars: int = 9000) -> str:
     text = (md or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
@@ -2017,66 +1827,3 @@ def _pack_study_for_meta(rec: Dict[str, str], idx: int, include_abstract: bool) 
 
     packed = "\n".join(lines).strip()
     return packed[: max(0, META_MAX_CHARS_PER_STUDY)]
-
-@st.cache_data(ttl=6 * 3600, show_spinner=False)
-def gpt_generate_meta_paragraph(
-    pmids_csv: str,
-    focus_question: str,
-    include_abstract: bool,
-    tone: str,
-) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
-
-    pmids = [p.strip() for p in (pmids_csv or "").split(",") if p.strip()]
-    if not pmids:
-        return ""
-
-    records: List[Dict[str, str]] = []
-    for p in pmids:
-        r = get_record(p)
-        if r:
-            records.append(r)
-
-    if not records:
-        return ""
-
-    blocks = [_pack_study_for_meta(r, i, include_abstract=include_abstract) for i, r in enumerate(records, start=1)]
-    studies_text = "\n\n".join(blocks).strip()
-
-    fq = (focus_question or "").strip()
-    fq_line = f"Focus question: {fq}" if fq else "Focus question: (none provided)"
-
-    instructions = (
-        "You are helping a clinician synthesize multiple studies that were saved from PubMed.\n"
-        "Write ONE paragraph of high-yield interpretive thoughts across the set.\n"
-        "Hard rules:\n"
-        "- Use ONLY information in the provided study blocks. Do not invent details.\n"
-        "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.\n"
-        "- If studies conflict or are too heterogeneous/unclear, say so plainly.\n"
-        "- Mention key limitations that are explicitly apparent without overreaching.\n"
-        "- If a focus question is provided, orient the synthesis around it.\n"
-        "- Output must be a single paragraph (no bullets, no headings).\n"
-        f"- Tone: {tone}.\n"
-    )
-
-    payload = {
-        "model": _openai_model(),
-        "instructions": instructions,
-        "input": f"{fq_line}\n\nSTUDIES:\n{studies_text}\n\nNow write the single-paragraph synthesis.",
-        "reasoning": {"effort": "medium"},
-        "text": {"verbosity": "medium"},
-        "max_output_tokens": 10000,
-        "store": False,
-    }
-
-    r = _post_with_retries(
-        OPENAI_RESPONSES_URL,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=60,
-    )
-    r.raise_for_status()
-
-    return (_extract_output_text(r.json()) or "").strip()
