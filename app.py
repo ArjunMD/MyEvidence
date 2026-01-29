@@ -477,13 +477,6 @@ def render_help_about_page() -> None:
         )
         return
 
-    st.download_button(
-        "Download README.md",
-        data=md,
-        file_name="README.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
     st.markdown(md)
 
 
