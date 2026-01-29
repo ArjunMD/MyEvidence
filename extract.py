@@ -1605,9 +1605,6 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str) -> Dict[str, s
         gname = ""
         year = ""
 
-    if not year:
-        year = _best_year_guess_from_text(snippet)
-
     spec = ""
     try:
         spec = gpt_extract_specialty(gname or fn, snippet)
