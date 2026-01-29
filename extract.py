@@ -4,7 +4,6 @@ import re
 import time
 import random
 import json
-import html
 import io
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 

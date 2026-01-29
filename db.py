@@ -6,14 +6,24 @@ import sqlite3
 import hashlib
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
+DB_PATH = "data/pmid_abstracts.db"
+GUIDELINES_DIR = "data/guidelines"
+GUIDELINES_MD_DIR = "data/guidelines_md"
 
 # ---------------- Local DB paths / connection ----------------
 
 def _db_path() -> str:
-    return os.getenv("PMID_DB_PATH", "data/pmid_abstracts.db").strip() or "data/pmid_abstracts.db"
+    return DB_PATH
 
+
+def _guidelines_dir() -> str:
+    return GUIDELINES_DIR
+
+
+def _guidelines_md_dir() -> str:
+    return GUIDELINES_MD_DIR
 
 def _connect_db() -> sqlite3.Connection:
     path = _db_path()
@@ -302,20 +312,6 @@ def list_recent_records(limit: int) -> List[Dict[str, str]]:
 
 # ---------------- Guidelines storage + schema ----------------
 
-def _guidelines_dir() -> str:
-    return os.getenv("GUIDELINES_DIR", "data/guidelines").strip() or "data/guidelines"
-
-
-def _guidelines_md_dir() -> str:
-    return os.getenv("GUIDELINES_MD_DIR", "data/guidelines_md").strip() or "data/guidelines_md"
-
-
-def _safe_stem(filename: str) -> str:
-    base = os.path.splitext(os.path.basename(filename or ""))[0]
-    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("_")
-    return (base[:80] or "guideline")
-
-
 def _sha256_bytes(b: bytes) -> str:
     h = hashlib.sha256()
     h.update(b or b"")
@@ -324,7 +320,6 @@ def _sha256_bytes(b: bytes) -> str:
 
 def _utc_iso_z() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
 
 def ensure_guidelines_schema() -> None:
     with _connect_db() as conn:

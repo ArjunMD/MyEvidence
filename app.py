@@ -2,7 +2,6 @@
 
 import re
 import html
-import hashlib
 from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
@@ -24,14 +23,11 @@ from db import (
     list_browse_items,
     list_browse_guideline_items,
     get_record,
-    update_pico_fields,
     delete_record,
     delete_guideline,
     save_guideline_pdf,
     list_guidelines,
     get_guideline_meta,
-    get_cached_layout_markdown,
-    guideline_rec_counts,
     list_guideline_recommendations,
     normalize_relevance_status,
     delete_guideline_recommendation,
@@ -56,13 +52,9 @@ from extract import (
     gpt_extract_specialty,
     _parse_nonneg_int,
     _parse_tag_list,
-    _normalize_bullets,
-    get_or_create_markdown,
     extract_and_store_guideline_recommendations_azure,
     extract_and_store_guideline_metadata_azure,
-    gpt_generate_meta_paragraph,
     _parse_year4,
-    # Import helpers for custom meta synthesis
     _pack_study_for_meta,
     _openai_api_key,
     _openai_model,
@@ -70,10 +62,6 @@ from extract import (
     _extract_output_text,
     OPENAI_RESPONSES_URL,
 )
-
-import json
-import random
-import time
 
 # silent safety caps (avoid loading/rendering huge DBs by accident)
 SEARCH_MAX_DEFAULT = 1500
@@ -1000,8 +988,6 @@ elif page == "DB Search":
         if bits:
             st.caption(" • ".join(bits))
 
-        counts = guideline_rec_counts(gid)
-
         st.divider()
 
         rec_filter = st.selectbox(
@@ -1189,7 +1175,6 @@ elif page == "Guidelines (PDF Upload)":
     up = st.file_uploader("Upload a guideline PDF", type=["pdf"], accept_multiple_files=False)
     if up is not None:
         pdf_bytes = up.getvalue()
-        size_mb = (len(pdf_bytes) / (1024 * 1024)) if pdf_bytes else 0.0
 
         if st.button("Upload + Extract", type="primary", width="stretch", key="guidelines_upload_extract_btn"):
             try:
@@ -1334,9 +1319,7 @@ elif page == "Guidelines (PDF Upload)":
             except Exception as e:
                 st.error(str(e))
 
-    meta_ex_at = (chosen.get("meta_extracted_at") or "").strip()
     meta = get_guideline_meta(gid)
-    cached_md = get_cached_layout_markdown(gid, meta.get("sha256", "")) if meta else ""
 
     st.divider()
 
@@ -1805,7 +1788,6 @@ elif page == "Delete":
 
         sel_gid = (guidelines[gsel_i].get("guideline_id") or "").strip()
         meta = get_guideline_meta(sel_gid) or {}
-        counts = guideline_rec_counts(sel_gid)
 
         st.write(f"**Filename:** {(meta.get('filename') or '').strip()}")
         st.write(f"**Uploaded:** {(meta.get('uploaded_at') or '').strip()}")
