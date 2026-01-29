@@ -1694,53 +1694,51 @@ elif page == "Delete":
 
         if not paper_rows:
             st.info("No saved papers found.")
-            st.stop()
+        else:
+            def _paper_label(r: Dict[str, str]) -> str:
+                pmid = (r.get("pmid") or "").strip()
+                title = (r.get("title") or "").strip()
+                year = (r.get("year") or "").strip()
+                journal = (r.get("journal") or "").strip()
+                bits = [title]
+                if year:
+                    bits.append(f"({year})")
+                if journal:
+                    bits.append(f"— {journal}")
+                return " ".join([b for b in bits if b]).strip()
 
-        def _paper_label(r: Dict[str, str]) -> str:
-            pmid = (r.get("pmid") or "").strip()
-            title = (r.get("title") or "").strip()
-            year = (r.get("year") or "").strip()
-            journal = (r.get("journal") or "").strip()
-            bits = [title]
-            if year:
-                bits.append(f"({year})")
-            if journal:
-                bits.append(f"— {journal}")
-            return " ".join([b for b in bits if b]).strip()
+            sel_i = st.selectbox(
+                "Select a paper",
+                list(range(len(paper_rows))),
+                format_func=lambda i: _paper_label(paper_rows[i]),
+                key="delete_paper_select_idx",
+            )
 
-        sel_i = st.selectbox(
-            "Select a paper",
-            list(range(len(paper_rows))),
-            format_func=lambda i: _paper_label(paper_rows[i]),
-            key="delete_paper_select_idx",
-        )
+            sel_pmid = (paper_rows[sel_i].get("pmid") or "").strip()
+            rec = get_record(sel_pmid) or {}
 
-        sel_pmid = (paper_rows[sel_i].get("pmid") or "").strip()
-        rec = get_record(sel_pmid) or {}
+            st.write(f"**PMID:** {sel_pmid}")
+            st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
 
-        st.write(f"**PMID:** {sel_pmid}")
-        st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
-        
+            with st.expander("Show abstract", expanded=False):
+                abs_txt = (rec.get('abstract') or '').strip()
+                if abs_txt:
+                    st.write(abs_txt)
 
-        with st.expander("Show abstract", expanded=False):
-            abs_txt = (rec.get('abstract') or '').strip()
-            if abs_txt:
-                st.write(abs_txt)
-
-        confirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_paper_{sel_pmid}")
-        if st.button(
-            "Delete paper",
-            type="primary",
-            width="stretch",
-            disabled=not confirm,
-            key=f"btn_delete_paper_{sel_pmid}",
-        ):
-            try:
-                delete_record(sel_pmid)
-                st.success("Deleted paper.")
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
+            confirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_paper_{sel_pmid}")
+            if st.button(
+                "Delete paper",
+                type="primary",
+                width="stretch",
+                disabled=not confirm,
+                key=f"btn_delete_paper_{sel_pmid}",
+            ):
+                try:
+                    delete_record(sel_pmid)
+                    st.success("Deleted paper.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
     with tab_guidelines:
         st.subheader("Delete a saved guideline")
@@ -1763,49 +1761,53 @@ elif page == "Delete":
             specialty = (r.get("specialty") or "").strip()
             guidelines.append({"guideline_id": gid, "title": title, "year": year, "specialty": specialty})
 
-        if not guidelines:
-            st.info("No saved guidelines found.")
-            st.stop()
+        if not paper_rows:
+            st.info("No saved papers found.")
+        else:
+            def _paper_label(r: Dict[str, str]) -> str:
+                pmid = (r.get("pmid") or "").strip()
+                title = (r.get("title") or "").strip()
+                year = (r.get("year") or "").strip()
+                journal = (r.get("journal") or "").strip()
+                bits = [title]
+                if year:
+                    bits.append(f"({year})")
+                if journal:
+                    bits.append(f"— {journal}")
+                return " ".join([b for b in bits if b]).strip()
 
-        def _guideline_label(r: Dict[str, str]) -> str:
-            gid = (r.get("guideline_id") or "").strip()
-            title = (r.get("title") or "").strip()
-            year = (r.get("year") or "").strip()
-            spec = (r.get("specialty") or "").strip()
-            bits = [title]
-            if year:
-                bits.append(f"({year})")
-            if spec:
-                bits.append(f"— {spec}")
-            return " ".join([b for b in bits if b]).strip()
+            sel_i = st.selectbox(
+                "Select a paper",
+                list(range(len(paper_rows))),
+                format_func=lambda i: _paper_label(paper_rows[i]),
+                key="delete_paper_select_idx",
+            )
 
-        gsel_i = st.selectbox(
-            "Select a guideline",
-            list(range(len(guidelines))),
-            format_func=lambda i: _guideline_label(guidelines[i]),
-            key="delete_guideline_select_idx",
-        )
+            sel_pmid = (paper_rows[sel_i].get("pmid") or "").strip()
+            rec = get_record(sel_pmid) or {}
 
-        sel_gid = (guidelines[gsel_i].get("guideline_id") or "").strip()
-        meta = get_guideline_meta(sel_gid) or {}
+            st.write(f"**PMID:** {sel_pmid}")
+            st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
 
-        st.write(f"**Filename:** {(meta.get('filename') or '').strip()}")
-        st.write(f"**Uploaded:** {(meta.get('uploaded_at') or '').strip()}")
+            with st.expander("Show abstract", expanded=False):
+                abs_txt = (rec.get('abstract') or '').strip()
+                if abs_txt:
+                    st.write(abs_txt)
 
-        gconfirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_guideline_{sel_gid}")
-        if st.button(
-            "Delete guideline",
-            type="primary",
-            width="stretch",
-            disabled=not gconfirm,
-            key=f"btn_delete_guideline_{sel_gid}",
-        ):
-            try:
-                delete_guideline(sel_gid)
-                st.success("Deleted guideline.")
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
+            confirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_paper_{sel_pmid}")
+            if st.button(
+                "Delete paper",
+                type="primary",
+                width="stretch",
+                disabled=not confirm,
+                key=f"btn_delete_paper_{sel_pmid}",
+            ):
+                try:
+                    delete_record(sel_pmid)
+                    st.success("Deleted paper.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(str(e))
 
 # =======================
 # Page: About
