@@ -172,7 +172,7 @@ def _year_sort_key(y: str) -> Tuple[int, str]:
 
 # --------------- Meta synthesis helpers (papers + guidelines) ---------------
 
-def _pack_guideline_for_meta(gid: str, idx: int, max_recs: int = 10) -> str:
+def _pack_guideline_for_meta(gid: str, idx: int, max_recs: int = 999999) -> str:
     """
     Construct a block of text representing a guideline for the meta synthesis prompt.
 
