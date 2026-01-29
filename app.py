@@ -1746,16 +1746,13 @@ elif page == "Delete":
         rec = get_record(sel_pmid) or {}
 
         st.write(f"**PMID:** {sel_pmid}")
-        st.write(f"**Title:** {(rec.get('title') or paper_rows[sel_i].get('title') or '').strip()}")
+        st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
+        
 
-        with st.expander("Show details", expanded=False):
-            st.write(f"**Year:** {(rec.get('year') or paper_rows[sel_i].get('year') or '').strip()}")
-            st.write(f"**Journal:** {(rec.get('journal') or paper_rows[sel_i].get('journal') or '').strip()}")
-            st.write(f"**Specialty:** {(rec.get('specialty') or paper_rows[sel_i].get('specialty') or '').strip()}")
+        with st.expander("Show abstract", expanded=False):
             abs_txt = (rec.get('abstract') or '').strip()
             if abs_txt:
-                st.markdown("**Abstract (preview):**")
-                st.write(abs_txt[:1200] + ("…" if len(abs_txt) > 1200 else ""))
+                st.write(abs_txt)
 
         confirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_paper_{sel_pmid}")
         if st.button(
@@ -1820,13 +1817,8 @@ elif page == "Delete":
         meta = get_guideline_meta(sel_gid) or {}
         counts = guideline_rec_counts(sel_gid)
 
-        st.write(f"**Title:** {(meta.get('guideline_name') or meta.get('filename') or guidelines[gsel_i].get('title') or '').strip()}")
-
-        with st.expander("Show details", expanded=False):
-            st.write(f"**Filename:** {(meta.get('filename') or '').strip()}")
-            st.write(f"**Uploaded:** {(meta.get('uploaded_at') or '').strip()}")
-            st.write(f"**Year:** {(meta.get('pub_year') or guidelines[gsel_i].get('year') or '').strip()}")
-            st.write(f"**Specialty:** {(meta.get('specialty') or guidelines[gsel_i].get('specialty') or '').strip()}")
+        st.write(f"**Filename:** {(meta.get('filename') or '').strip()}")
+        st.write(f"**Uploaded:** {(meta.get('uploaded_at') or '').strip()}")
 
         gconfirm = st.checkbox("Confirm permanent delete", key=f"confirm_delete_guideline_{sel_gid}")
         if st.button(
