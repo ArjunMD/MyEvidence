@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-DB_PATH = "data/pmid_abstracts.db"
+DB_PATH = "data/papers.db"
 GUIDELINES_DIR = "data/guidelines"
 GUIDELINES_MD_DIR = "data/guidelines_md"
 

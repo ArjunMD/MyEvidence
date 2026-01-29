@@ -37,6 +37,10 @@ from db import (
 
 # ---------------- Constants ----------------
 
+NCBI_TOOL = "streamlit-pmid-abstract"
+NCBI_EMAIL = ""
+NCBI_API_KEY = ""
+
 NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 NCBI_ELINK_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
 NCBI_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
@@ -48,7 +52,15 @@ GUIDELINE_CANDIDATE_MAX = 250
 GUIDELINE_OPENAI_BATCH_SIZE = 20  # OpenAI decides which candidates are true recommendations
 GUIDELINE_OPENAI_MAX_CHARS_PER_ITEM = 1800
 
-GUIDELINE_OPENAI_STRICTNESS = os.getenv("GUIDELINE_OPENAI_STRICTNESS", "medium").strip().lower()
+GUIDELINE_OPENAI_STRICTNESS = "medium"  # "strict" | "medium" | "loose"
+
+SECTION_TRIAGE_BATCH = 10
+SECTION_PREVIEW_HEAD_CHARS = 1200
+SECTION_PREVIEW_TAIL_CHARS = 700
+SECTION_PREVIEW_MAX_HINT_LINES = 28
+SECTION_MAX_CHARS_SEND = 14000
+SECTION_PART_OVERLAP_CHARS = 600
+
 
 _RECO_HINT_RE = re.compile(
     r"(?i)\b(recommend|recommended|should|we suggest|we recommend|is indicated|are indicated|is not recommended|do not|avoid|consider)\b"
@@ -63,16 +75,6 @@ META_MAX_CHARS_PER_STUDY = 10000
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
 # ---------------- Section-based recommendation pipeline ----------------
-
-SECTION_TRIAGE_BATCH = int(os.getenv("SECTION_TRIAGE_BATCH", "10"))
-SECTION_PREVIEW_HEAD_CHARS = int(os.getenv("SECTION_PREVIEW_HEAD_CHARS", "1200"))
-SECTION_PREVIEW_TAIL_CHARS = int(os.getenv("SECTION_PREVIEW_TAIL_CHARS", "700"))
-SECTION_PREVIEW_MAX_HINT_LINES = int(os.getenv("SECTION_PREVIEW_MAX_HINT_LINES", "28"))
-
-# How much of a full section to send per extraction call.
-# If a section is larger, it will be split into parts (still under the same heading path).
-SECTION_MAX_CHARS_SEND = int(os.getenv("SECTION_MAX_CHARS_SEND", "14000"))
-SECTION_PART_OVERLAP_CHARS = int(os.getenv("SECTION_PART_OVERLAP_CHARS", "600"))
 
 def _heading_level(line: str) -> int:
     ln = (line or "").lstrip()
@@ -219,20 +221,17 @@ def _itertext(el: Optional[ET.Element]) -> str:
 
 
 def _ncbi_params_base() -> Dict[str, str]:
-    params = {
-        "tool": os.getenv("NCBI_TOOL", "streamlit-pmid-abstract"),
-        "email": os.getenv("NCBI_EMAIL", "").strip(),
-    }
-    api_key = os.getenv("NCBI_API_KEY", "").strip()
-    if api_key:
-        params["api_key"] = api_key
+    params = {"tool": NCBI_TOOL, "email": (NCBI_EMAIL or "").strip()}
+    k = (NCBI_API_KEY or "").strip()
+    if k:
+        params["api_key"] = k
     return params
 
 
 @st.cache_resource
 def _requests_session() -> requests.Session:
     s = requests.Session()
-    email = os.getenv("NCBI_EMAIL", "").strip()
+    email = (NCBI_EMAIL or "").strip()
     ua = "streamlit-pmid-abstract/1.0"
     if email:
         ua += f" ({email})"
@@ -438,21 +437,10 @@ def _openai_api_key() -> str:
             return str(st.secrets["OPENAI_API_KEY"]).strip()
     except Exception:
         pass
-    try:
-        if "openai" in st.secrets and "api_key" in st.secrets["openai"]:
-            return str(st.secrets["openai"]["api_key"]).strip()
-    except Exception:
-        pass
-    return os.getenv("OPENAI_API_KEY", "").strip()
 
 
 def _openai_model() -> str:
-    try:
-        if "OPENAI_MODEL" in st.secrets:
-            return str(st.secrets["OPENAI_MODEL"]).strip() or "gpt-5.2"
-    except Exception:
-        pass
-    return (os.getenv("OPENAI_MODEL", "").strip() or "gpt-5.2")
+    return ("gpt-5.2")
 
 
 
@@ -467,12 +455,6 @@ def _semantic_scholar_api_key() -> str:
             return str(st.secrets["SEMANTIC_SCHOLAR_API_KEY"]).strip()
     except Exception:
         pass
-    try:
-        if "semantic_scholar" in st.secrets and "api_key" in st.secrets["semantic_scholar"]:
-            return str(st.secrets["semantic_scholar"]["api_key"]).strip()
-    except Exception:
-        pass
-    return os.getenv("SEMANTIC_SCHOLAR_API_KEY", "").strip()
 
 @st.cache_data(show_spinner=False, ttl=60 * 60)
 def get_s2_similar_papers(pmid: str, top_n: int = 5) -> List[Dict[str, str]]:
@@ -1024,7 +1006,6 @@ def _azure_di_endpoint() -> str:
             return str(st.secrets["AZURE_DI_ENDPOINT"]).strip()
     except Exception:
         pass
-    return os.getenv("AZURE_DI_ENDPOINT", "").strip()
 
 
 def _azure_di_key() -> str:
@@ -1033,8 +1014,6 @@ def _azure_di_key() -> str:
             return str(st.secrets["AZURE_DI_KEY"]).strip()
     except Exception:
         pass
-    return os.getenv("AZURE_DI_KEY", "").strip()
-
 
 def _require_azure_di() -> None:
     if DocumentIntelligenceClient is None or AzureKeyCredential is None:
