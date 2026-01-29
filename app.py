@@ -1408,9 +1408,6 @@ elif page == "Guidelines (PDF Upload)":
 
         with st.container(border=True):
             label = f"{icon} Recommendation {rec_num}/{total_recs} — Status: {_status_label(status)}"
-            if se_bits:
-                label += f" • {' • '.join(se_bits)}"
-
             st.text_area(
                 label=label,          # ✅ all the info lives here now
                 value=default_text,

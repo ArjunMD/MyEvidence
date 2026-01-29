@@ -63,6 +63,155 @@ META_MAX_CHARS_PER_STUDY = 10000
 
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
+# ---------------- Section-based recommendation pipeline ----------------
+
+SECTION_TRIAGE_BATCH = int(os.getenv("SECTION_TRIAGE_BATCH", "10"))
+SECTION_PREVIEW_HEAD_CHARS = int(os.getenv("SECTION_PREVIEW_HEAD_CHARS", "1200"))
+SECTION_PREVIEW_TAIL_CHARS = int(os.getenv("SECTION_PREVIEW_TAIL_CHARS", "700"))
+SECTION_PREVIEW_MAX_HINT_LINES = int(os.getenv("SECTION_PREVIEW_MAX_HINT_LINES", "28"))
+
+# How much of a full section to send per extraction call.
+# If a section is larger, it will be split into parts (still under the same heading path).
+SECTION_MAX_CHARS_SEND = int(os.getenv("SECTION_MAX_CHARS_SEND", "14000"))
+SECTION_PART_OVERLAP_CHARS = int(os.getenv("SECTION_PART_OVERLAP_CHARS", "600"))
+
+def _heading_level(line: str) -> int:
+    ln = (line or "").lstrip()
+    if not ln.startswith("#"):
+        return 0
+    return len(ln) - len(ln.lstrip("#"))
+
+def _heading_text(line: str) -> str:
+    return (line or "").lstrip("#").strip()
+
+def _path_from_stack(stack: List[str]) -> str:
+    parts = [p.strip() for p in (stack or []) if p and p.strip()]
+    return " > ".join(parts).strip()
+
+def _split_markdown_into_sections(md: str) -> List[Dict[str, str]]:
+    """
+    Turn markdown into sections keyed by a full heading-path.
+    A new section begins at each heading and continues until the next heading.
+    """
+    text = (md or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+
+    sections: List[Dict[str, str]] = []
+    heading_stack: List[str] = []
+
+    current_path = ""
+    current_level = 0
+    buf: List[str] = []
+
+    def flush():
+        nonlocal buf, current_path, current_level
+        content = "\n".join(buf).strip()
+        buf = []
+        if content:
+            sections.append(
+                {
+                    "path": current_path or "(no heading)",
+                    "level": str(int(current_level or 0)),
+                    "content": content,
+                }
+            )
+
+    for ln in lines:
+        lvl = _heading_level(ln)
+        if lvl > 0:
+            # New heading -> flush previous section content
+            flush()
+
+            title = _heading_text(ln)
+            # Maintain a stack where index = level-1
+            if lvl <= 0:
+                heading_stack = []
+            else:
+                heading_stack = heading_stack[: max(0, lvl - 1)]
+            heading_stack.append(title or "(untitled)")
+            current_path = _path_from_stack(heading_stack)
+            current_level = lvl
+
+            # Keep the heading line as part of section content (helps GPT)
+            buf.append(ln.strip())
+            continue
+
+        # normal line
+        buf.append(ln)
+
+    flush()
+
+    # If no headings exist, treat whole doc as one section
+    if not sections:
+        whole = (md or "").strip()
+        if whole:
+            sections = [{"path": "(no heading)", "level": "0", "content": whole}]
+
+    # assign stable sec_idx in traversal order
+    out: List[Dict[str, str]] = []
+    for i, s in enumerate(sections, start=1):
+        out.append(
+            {
+                "sec_idx": str(i),
+                "path": (s.get("path") or "").strip() or "(no heading)",
+                "level": (s.get("level") or "0").strip(),
+                "content": (s.get("content") or "").strip(),
+            }
+        )
+    return out
+
+def _section_preview(section_text: str) -> str:
+    """
+    Preview = head + tail + a few "high-signal" lines that contain recommendation hints.
+    Helps triage without missing recs that appear late in a section.
+    """
+    s = (section_text or "").strip()
+    if not s:
+        return ""
+
+    head = s[: max(0, SECTION_PREVIEW_HEAD_CHARS)]
+    tail = s[-max(0, SECTION_PREVIEW_TAIL_CHARS) :] if len(s) > SECTION_PREVIEW_TAIL_CHARS else ""
+
+    # Hint lines: any line matching recommendation or grading regex
+    hint_lines: List[str] = []
+    for ln in s.splitlines():
+        t = (ln or "").strip()
+        if not t:
+            continue
+        if _RECO_HINT_RE.search(t) or _LOE_HINT_RE.search(t) or re.match(r"(?i)^\s*(recommendation|statement|practice point)\b", t):
+            hint_lines.append(t[:240])
+        if len(hint_lines) >= SECTION_PREVIEW_MAX_HINT_LINES:
+            break
+
+    parts = []
+    parts.append("HEAD:\n" + head)
+    if hint_lines:
+        parts.append("HINT_LINES:\n" + "\n".join(hint_lines))
+    if tail and tail != head:
+        parts.append("TAIL:\n" + tail)
+    return "\n\n".join(parts).strip()
+
+def _split_large_section(text: str, max_chars: int, overlap: int) -> List[str]:
+    """
+    Split oversized sections into overlapping parts (best-effort, keeps context).
+    """
+    s = (text or "").strip()
+    if not s:
+        return []
+    if len(s) <= max_chars:
+        return [s]
+
+    out: List[str] = []
+    start = 0
+    while start < len(s):
+        end = min(len(s), start + max_chars)
+        chunk = s[start:end].strip()
+        if chunk:
+            out.append(chunk)
+        if end >= len(s):
+            break
+        start = max(0, end - max(0, overlap))
+    return out
 
 # ---------------- Core helpers ----------------
 
@@ -1342,6 +1491,197 @@ Rules:
     return out
 
 
+def _openai_triage_sections(sections: List[Dict[str, str]]) -> List[int]:
+    """
+    First pass: decide which sections likely contain formal recommendations.
+    Returns a list of sec_idx (ints) to pursue.
+    """
+    key = _openai_api_key()
+    if not key:
+        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+
+    items = []
+    for s in sections:
+        try:
+            sec_idx = int(s.get("sec_idx") or 0)
+        except Exception:
+            continue
+        path = (s.get("path") or "").strip()
+        content = (s.get("content") or "").strip()
+        if not content:
+            continue
+        items.append(
+            {
+                "sec_idx": sec_idx,
+                "path": path[:220],
+                "preview": _section_preview(content)[:5000],
+            }
+        )
+
+    if not items:
+        return []
+
+    strictness = (GUIDELINE_OPENAI_STRICTNESS or "medium").strip().lower()
+
+    instructions = f"""You are triaging sections of a clinical guideline to find where *formal clinical recommendations* likely appear.
+Input is JSON with items: sec_idx, path (heading path), preview (head/tail + hint lines).
+
+Return ONLY valid JSON with this exact shape:
+{{ "keep": [<sec_idx integers>], "maybe": [<sec_idx integers>] }}
+
+Guidance:
+- "keep": sections very likely to contain formal recommendations/statements/practice points/graded directives.
+- "maybe": sections that might contain recommendations but you are less confident.
+- Prefer precision but don't miss obvious recommendation sections (e.g., 'Recommendations', 'Practice points', 'Summary of recommendations', 'Algorithm', 'Key statements').
+
+Do NOT include methods/background/evidence review unless there is clear directive language intended as guidance.
+
+Strictness mode is '{strictness}'. In 'strict', be more conservative.
+"""
+
+    payload = {
+        "model": _openai_model(),
+        "instructions": instructions,
+        "input": "SECTIONS_JSON:\n" + json.dumps({"items": items}, ensure_ascii=False) + "\n\nReturn JSON now.",
+        "text": {"verbosity": "low"},
+        "max_output_tokens": 900,
+        "temperature": 0,
+        "store": False,
+    }
+
+    r = _post_with_retries(
+        OPENAI_RESPONSES_URL,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
+    r.raise_for_status()
+
+    raw = (_extract_output_text(r.json()) or "").strip()
+    if not raw:
+        return []
+
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
+        if not m:
+            return []
+        try:
+            obj = json.loads(m.group(1))
+        except Exception:
+            return []
+
+    keep = obj.get("keep") or []
+    maybe = obj.get("maybe") or []
+
+    out: List[int] = []
+    for arr in (keep, maybe):
+        if not isinstance(arr, list):
+            continue
+        for v in arr:
+            try:
+                out.append(int(v))
+            except Exception:
+                continue
+
+    # dedupe while preserving order
+    seen = set()
+    final = []
+    for x in out:
+        if x in seen:
+            continue
+        seen.add(x)
+        final.append(x)
+    return final
+
+def _openai_extract_recos_from_section(section_text: str, heading_path: str) -> List[Dict[str, str]]:
+    """
+    Second pass: extract recommendations from the full section text.
+    """
+    key = _openai_api_key()
+    if not key:
+        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+
+    sec = (section_text or "").strip()
+    if not sec:
+        return []
+
+    strictness = (GUIDELINE_OPENAI_STRICTNESS or "medium").strip().lower()
+
+    instructions = f"""You extract *formal clinical guideline recommendations* from a single guideline section.
+You must be faithful to the text.
+
+Return ONLY valid JSON with this exact shape:
+{{ "items": [ {{"recommendation_text":"...","strength_raw":"...","evidence_raw":"...","source_snippet":"..."}}, ... ] }}
+
+Rules:
+- Use ONLY what is explicitly present in the section. Never infer.
+- If no formal recommendation is present, return {{ "items": [] }}.
+- recommendation_text: include the full actionable directive sentence(s). Do not truncate clauses.
+- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
+- source_snippet: verbatim excerpt <= 240 chars that supports the recommendation (include grade markers if present).
+- Strings only; never null. No extra keys.
+
+Strictness mode: '{strictness}'
+- In 'strict': extract only clearly labeled/graded or clearly directive guidance intended as recommendations.
+- In 'loose': allow ungraded but clearly directive practice guidance.
+"""
+
+    payload = {
+        "model": _openai_model(),
+        "instructions": instructions,
+        "input": f"HEADING_PATH:\n{(heading_path or '').strip()}\n\nSECTION_TEXT:\n{sec}\n\nReturn JSON now.",
+        "text": {"verbosity": "low"},
+        "max_output_tokens": 1400,
+        "temperature": 0,
+        "store": False,
+    }
+
+    r = _post_with_retries(
+        OPENAI_RESPONSES_URL,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=90,
+    )
+    r.raise_for_status()
+
+    raw = (_extract_output_text(r.json()) or "").strip()
+    if not raw:
+        return []
+
+    try:
+        obj = json.loads(raw)
+    except Exception:
+        m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
+        if not m:
+            return []
+        try:
+            obj = json.loads(m.group(1))
+        except Exception:
+            return []
+
+    items = obj.get("items")
+    if not isinstance(items, list):
+        return []
+
+    out: List[Dict[str, str]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        rec = (it.get("recommendation_text") or "").strip()
+        if not rec:
+            continue
+        out.append(
+            {
+                "recommendation_text": rec,
+                "strength_raw": (it.get("strength_raw") or "").strip(),
+                "evidence_raw": (it.get("evidence_raw") or "").strip(),
+                "source_snippet": (it.get("source_snippet") or "").strip(),
+            }
+        )
+    return out
+
 def extract_and_store_guideline_recommendations_azure(guideline_id: str, progress_cb=None) -> int:
     """
     Azure DI markdown -> elements -> candidates -> OpenAI -> store via db.py
@@ -1357,95 +1697,105 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
     if not md:
         return 0
 
-    elements = _split_markdown_into_elements(md)
-
-    # Build candidates using *format* first, then let OpenAI decide what's truly a recommendation.
-    current_section = ""
-    candidates: List[Dict] = []
-    for idx, el in enumerate(elements):
-        kind = (el.get("kind") or "text").strip()
-        content = (el.get("content") or "").strip()
-        if not content:
-            continue
-
-        if kind == "heading":
-            current_section = content
-            continue
-
-        is_structured = kind in ("list_item", "table_row", "callout")
-        if is_structured or _is_candidate_reco(content):
-            candidates.append({"idx": idx, "kind": kind, "section": current_section, "content": content})
-
-    if not candidates:
+    # 1) Build full sections with heading paths
+    sections = _split_markdown_into_sections(md)
+    if not sections:
         return 0
-    if len(candidates) > GUIDELINE_CANDIDATE_MAX:
-        candidates = candidates[:GUIDELINE_CANDIDATE_MAX]
+
+    # Optional safety cap for pathological docs
+    if len(sections) > 3000:
+        sections = sections[:3000]
+
+    # 2) TRIAGE pass: decide which sections to pursue
+    # Batch triage to keep prompts bounded
+    keep_sec_idxs: List[int] = []
+    for b0 in range(0, len(sections), SECTION_TRIAGE_BATCH):
+        batch = sections[b0 : b0 + SECTION_TRIAGE_BATCH]
+        try:
+            keep = _openai_triage_sections(batch)
+        except Exception:
+            keep = []
+        keep_sec_idxs.extend(keep)
+        if progress_cb:
+            progress_cb(min(b0 + len(batch), len(sections)), len(sections))
+
+    keep_set = set(int(x) for x in keep_sec_idxs if isinstance(x, int) or str(x).isdigit())
+    if not keep_set:
+        return 0
 
     created_at = _utc_iso_z()
     stored = 0
     seen = set()
 
-    # Store candidate elements (best-effort) and precompute hashes
-    hash_by_idx: Dict[int, str] = {}
-    for j, it in enumerate(candidates, start=1):
-        if progress_cb:
-            progress_cb(j, len(candidates))
-        idx = int(it["idx"])
-        kind = it.get("kind") or "text"
-        content = it.get("content") or ""
-        content_hash = _hash_text(content)
-        hash_by_idx[idx] = content_hash
+    # 3) For each kept section: store as an element + extract recommendations from full section
+    # NOTE: storage function lives in db.py; imported lazily to avoid circular imports.
+    from db import insert_guideline_element, insert_guideline_recommendation
 
+    for s in sections:
         try:
-            insert_guideline_element(gid, idx, kind, content, content_hash)
+            sec_idx = int(s.get("sec_idx") or 0)
+        except Exception:
+            continue
+        if sec_idx not in keep_set:
+            continue
+
+        path = (s.get("path") or "").strip() or "(no heading)"
+        content = (s.get("content") or "").strip()
+        if not content:
+            continue
+
+        # store section as a guideline_element (best-effort) for audit/debug
+        sec_blob = f"PATH: {path}\n\n{content}".strip()
+        sec_hash = _hash_text(sec_blob)
+        try:
+            insert_guideline_element(gid, sec_idx, "section", sec_blob[:GUIDELINE_ELEMENT_MAX_CHARS], sec_hash)
         except Exception:
             pass
 
-    # Ask OpenAI (in batches) which candidates are *formal* recommendations and extract them.
-    for b0 in range(0, len(candidates), GUIDELINE_OPENAI_BATCH_SIZE):
-        batch = candidates[b0 : b0 + GUIDELINE_OPENAI_BATCH_SIZE]
-        if progress_cb:
-            progress_cb(min(b0 + len(batch), len(candidates)), len(candidates))
-
-        recos = _openai_extract_recos_from_elements_batch(batch)
-        if not recos:
-            continue
-
-        for rco in recos:
+        # 4) EXTRACT pass: send the whole section (or split into parts if huge)
+        parts = _split_large_section(content, max_chars=SECTION_MAX_CHARS_SEND, overlap=SECTION_PART_OVERLAP_CHARS)
+        for pi, part in enumerate(parts, start=1):
+            part_path = path if len(parts) == 1 else f"{path} (part {pi}/{len(parts)})"
             try:
-                idx = int(rco.get("idx") or -1)
+                recos = _openai_extract_recos_from_section(part, part_path)
             except Exception:
-                continue
-            if idx < 0:
+                recos = []
+
+            if not recos:
                 continue
 
-            rec_text = (rco.get("recommendation_text") or "").strip()
-            if not rec_text:
-                continue
+            for rco in recos:
+                rec_text = (rco.get("recommendation_text") or "").strip()
+                if not rec_text:
+                    continue
 
-            dedupe_key = (
-                rec_text.lower(),
-                (rco.get("strength_raw") or "").lower(),
-                (rco.get("evidence_raw") or "").lower(),
-            )
-            if dedupe_key in seen:
-                continue
-            seen.add(dedupe_key)
+                strength = (rco.get("strength_raw") or "").strip()
+                evidence = (rco.get("evidence_raw") or "").strip()
+                snippet = (rco.get("source_snippet") or "").strip()
 
-            try:
-                insert_guideline_recommendation(
-                    guideline_id=gid,
-                    idx=int(idx),
-                    recommendation_text=rec_text,
-                    strength_raw=(rco.get("strength_raw") or "").strip() or None,
-                    evidence_raw=(rco.get("evidence_raw") or "").strip() or None,
-                    source_snippet=(rco.get("source_snippet") or "").strip() or None,
-                    element_hash=hash_by_idx.get(idx) or _hash_text(rec_text),
-                    created_at=created_at,
-                )
-                stored += 1
-            except Exception:
-                pass
+                # Light dedupe
+                dedupe_key = (rec_text.lower(), strength.lower(), evidence.lower())
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                # Persist; put heading path into snippet for downstream visibility
+                snip_final = f"[{path}] {snippet}".strip() if snippet else f"[{path}]".strip()
+
+                try:
+                    insert_guideline_recommendation(
+                        guideline_id=gid,
+                        idx=int(sec_idx),
+                        recommendation_text=rec_text,
+                        strength_raw=strength or None,
+                        evidence_raw=evidence or None,
+                        source_snippet=snip_final or None,
+                        element_hash=sec_hash,
+                        created_at=created_at,
+                    )
+                    stored += 1
+                except Exception:
+                    pass
 
     return stored
 
@@ -1605,7 +1955,6 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str) -> Dict[str, s
         gname = ""
         year = ""
 
-    spec = ""
     try:
         spec = gpt_extract_specialty(gname or fn, snippet)
     except Exception:
