@@ -1,3 +1,5 @@
+# db.py
+
 import os
 import re
 import sqlite3
@@ -190,7 +192,7 @@ def list_browse_items(limit: int) -> List[Dict[str, str]]:
                 "journal": (r["journal"] or "").strip(),
                 "patient_n": str(r["patient_n"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
-                "authors_conclusions": (r["authors_conclusions"] or "").strip(),    
+                "authors_conclusions": (r["authors_conclusions"] or "").strip(),
             }
         )
     return out
@@ -416,6 +418,13 @@ def ensure_guidelines_schema() -> None:
         except Exception:
             pass
 
+        # Convert any legacy values to the new canonical ones
+        try:
+            conn.execute("UPDATE guideline_recommendations SET relevance_status='active' WHERE relevance_status='relevant';")
+            conn.execute("UPDATE guideline_recommendations SET relevance_status='passive' WHERE relevance_status='irrelevant';")
+        except Exception:
+            pass
+
 
 def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
     s = (sha256 or "").strip()
@@ -541,7 +550,6 @@ def read_guideline_pdf_bytes(guideline_id: str) -> bytes:
         return b""
     with open(path, "rb") as f:
         return f.read()
-
 
 
 def delete_guideline(guideline_id: str) -> None:
@@ -772,10 +780,80 @@ def insert_guideline_recommendation(
 # ---------------- Guideline recommendations + review state ----------------
 
 def normalize_relevance_status(raw: str) -> str:
+    """
+    Canonical statuses:
+      - 'unreviewed' (default)
+      - 'active'
+      - 'passive'
+
+    Legacy values ('relevant'/'irrelevant') are accepted and mapped.
+    """
     s = (raw or "").strip().lower()
-    if s in ("relevant", "irrelevant", "unreviewed"):
+    if s == "relevant":
+        return "active"
+    if s == "irrelevant":
+        return "passive"
+    if s in ("active", "passive", "unreviewed"):
         return s
     return "unreviewed"
+
+
+def update_guideline_recommendation(
+    *,
+    rec_id: str,
+    recommendation_text: Optional[str] = None,
+    relevance_status: Optional[str] = None,
+    clear_strength_evidence: bool = False,
+) -> None:
+    """
+    Update a guideline recommendation's text and/or relevance_status.
+
+    - relevance_status should be one of: 'unreviewed', 'active', 'passive'
+      (legacy 'relevant'/'irrelevant' will be mapped)
+    - If clear_strength_evidence=True, strength_raw and evidence_raw are set to NULL
+      (useful if you've merged them into recommendation_text).
+    """
+    rid = (rec_id or "").strip()
+    if not rid:
+        return
+
+    sets: List[str] = []
+    params: List[object] = []
+
+    if recommendation_text is not None:
+        rt = (recommendation_text or "").strip()
+        if not rt:
+            raise ValueError("Recommendation text cannot be blank.")
+        sets.append("recommendation_text=?")
+        params.append(rt)
+
+    if relevance_status is not None:
+        s = normalize_relevance_status(relevance_status)
+        sets.append("relevance_status=?")
+        params.append(s)
+
+    if clear_strength_evidence:
+        sets.append("strength_raw=NULL")
+        sets.append("evidence_raw=NULL")
+
+    if not sets:
+        return
+
+    now = _utc_iso_z()
+    sets.append("updated_at=?")
+    params.append(now)
+
+    params.append(rid)
+
+    with _connect_db() as conn:
+        conn.execute(
+            f"""
+            UPDATE guideline_recommendations
+            SET {", ".join(sets)}
+            WHERE rec_id=?;
+            """,
+            tuple(params),
+        )
 
 
 def list_guideline_recommendations(guideline_id: str, limit: int = 2000) -> List[Dict[str, str]]:
@@ -816,9 +894,9 @@ def list_guideline_recommendations(guideline_id: str, limit: int = 2000) -> List
 def guideline_rec_counts(guideline_id: str) -> Dict[str, int]:
     gid = (guideline_id or "").strip()
     if not gid:
-        return {"relevant": 0, "unreviewed": 0, "irrelevant": 0}
+        return {"active": 0, "unreviewed": 0, "passive": 0}
 
-    counts = {"relevant": 0, "unreviewed": 0, "irrelevant": 0}
+    counts = {"active": 0, "unreviewed": 0, "passive": 0}
     with _connect_db() as conn:
         rows = conn.execute(
             """
@@ -830,53 +908,10 @@ def guideline_rec_counts(guideline_id: str) -> Dict[str, int]:
             (gid,),
         ).fetchall()
     for r in rows:
-        s = (r["s"] or "unreviewed").strip().lower()
+        s = normalize_relevance_status((r["s"] or "unreviewed"))
         if s in counts:
             counts[s] = int(r["c"] or 0)
     return counts
-
-
-def mark_guideline_recommendation_relevant(rec_id: str, recommendation_text: str) -> None:
-    rid = (rec_id or "").strip()
-    if not rid:
-        return
-
-    rec_text = (recommendation_text or "").strip()
-    if not rec_text:
-        raise ValueError("Recommendation text cannot be blank.")
-
-    now = _utc_iso_z()
-    with _connect_db() as conn:
-        conn.execute(
-            """
-            UPDATE guideline_recommendations
-            SET recommendation_text=?,
-                relevance_status='relevant',
-                strength_raw=NULL,
-                evidence_raw=NULL,
-                updated_at=?
-            WHERE rec_id=?;
-            """,
-            (rec_text, now, rid),
-        )
-
-
-def mark_guideline_recommendation_irrelevant(rec_id: str) -> None:
-    rid = (rec_id or "").strip()
-    if not rid:
-        return
-
-    now = _utc_iso_z()
-    with _connect_db() as conn:
-        conn.execute(
-            """
-            UPDATE guideline_recommendations
-            SET relevance_status='irrelevant',
-                updated_at=?
-            WHERE rec_id=?;
-            """,
-            (now, rid),
-        )
 
 
 def delete_guideline_recommendation(rec_id: str) -> None:
@@ -893,6 +928,7 @@ def delete_guideline_recommendation(rec_id: str) -> None:
             """,
             (rid,),
         )
+
 
 def update_guideline_metadata(
     guideline_id: str,
