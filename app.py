@@ -33,7 +33,7 @@ from db import (
     list_recent_records,
     get_guideline_recommendations_display,
     update_guideline_recommendations_display,
-
+    purge_guideline_pdf,
 
 )
 from extract import (
@@ -42,6 +42,7 @@ from extract import (
     parse_year,
     parse_journal,
     parse_title,
+    get_or_create_markdown,
     get_top_neighbors,
     get_s2_similar_papers,
     gpt_extract_patient_n,
@@ -1223,6 +1224,21 @@ elif page == "Guidelines (PDF Upload)":
                     # Best-effort; don't fail upload flow if display generation fails
                     pass
 
+                # ---- Always cache markdown, then always purge PDF ----
+                # This prevents disk growth in data/guidelines/*.pdf while keeping future extraction possible.
+                with st.spinner("Caching markdown (required before purging PDF)…"):
+                    md_cached = (get_or_create_markdown(gid_saved) or "").strip()
+                    if not md_cached:
+                        raise RuntimeError(
+                            "Could not cache markdown for this guideline, so the PDF was NOT purged. "
+                            "Check Azure DI configuration/logs."
+                        )
+
+                try:
+                    purge_guideline_pdf(gid_saved)
+                except Exception:
+                    # Best-effort: don't fail the whole flow if purge fails
+                    pass
 
                 st.success(f"Done. Guideline ID: `{gid_saved}` • Stored recommendations: {n_recs if n_recs else '—'}")
                 st.rerun()

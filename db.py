@@ -557,6 +557,42 @@ def delete_guideline(guideline_id: str) -> None:
         pass
 
 
+def purge_guideline_pdf(guideline_id: str) -> None:
+    """
+    Delete the stored PDF from disk (best-effort) and clear stored_path.
+    Keeps extracted content + cached markdown in SQLite.
+    """
+    gid = (guideline_id or "").strip()
+    if not gid:
+        return
+
+    stored_path = ""
+    with _connect_db() as conn:
+        row = conn.execute(
+            "SELECT stored_path FROM guidelines WHERE guideline_id=? LIMIT 1;",
+            (gid,),
+        ).fetchone()
+        if not row:
+            return
+        stored_path = (row["stored_path"] or "").strip()
+
+        # Keep row, just clear the path (stored_path is NOT NULL, so use empty string)
+        conn.execute(
+            "UPDATE guidelines SET stored_path='' WHERE guideline_id=?;",
+            (gid,),
+        )
+
+    # Best-effort remove stored PDF from disk (guarded to guidelines dir)
+    try:
+        if stored_path:
+            gdir = os.path.abspath(_guidelines_dir())
+            pabs = os.path.abspath(stored_path)
+            if pabs.startswith(gdir + os.sep) and os.path.exists(pabs):
+                os.remove(pabs)
+    except Exception:
+        pass
+
+
 # ---------------- Guideline layout markdown cache ----------------
 
 def get_guideline_meta(guideline_id: str) -> Dict[str, str]:
