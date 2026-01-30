@@ -26,11 +26,9 @@ if TYPE_CHECKING:
 
 # ---- imports from db layer (must exist in db.py) ----
 from db import (
-    read_guideline_pdf_bytes,
     get_guideline_meta,
-    get_cached_layout_markdown,
-    save_layout_markdown,
     update_guideline_metadata,
+    update_guideline_recommendations_display,
     get_record,
 )
 
@@ -1275,24 +1273,10 @@ def analyze_pdf_to_markdown_azure(pdf_bytes: bytes) -> str:
     return (getattr(result, "content", "") or "").strip()
 
 
-def get_or_create_markdown(guideline_id: str) -> str:
-    meta = get_guideline_meta(guideline_id)
-    if not meta:
-        return ""
-    sha = meta.get("sha256", "")
-    cached = get_cached_layout_markdown(guideline_id, sha)
-    if (cached or "").strip():
-        return cached.strip()
-
-    pdf_bytes = read_guideline_pdf_bytes(guideline_id)
+def markdown_from_pdf_bytes(pdf_bytes: bytes) -> str:
     if not pdf_bytes:
         return ""
-
-    md = analyze_pdf_to_markdown_azure(pdf_bytes)
-    if md.strip():
-        save_layout_markdown(guideline_id, sha, md)
-    return md.strip()
-
+    return (analyze_pdf_to_markdown_azure(pdf_bytes) or "").strip()
 
 def _hash_text(s: str) -> str:
     import hashlib
@@ -1494,32 +1478,21 @@ Strictness mode: '{strictness}'
         )
     return out
 
-def extract_and_store_guideline_recommendations_azure(guideline_id: str, progress_cb=None) -> int:
-    """
-    Azure DI markdown -> elements -> candidates -> OpenAI -> store via db.py
-    NOTE: storage function lives in db.py; we import it lazily to avoid circular imports.
-    """
-    from db import insert_guideline_element, insert_guideline_recommendation  # must exist in db.py
-
+def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_bytes: bytes, progress_cb=None) -> int:
     gid = (guideline_id or "").strip()
     if not gid:
         return 0
 
-    md = get_or_create_markdown(gid)
+    md = markdown_from_pdf_bytes(pdf_bytes)
     if not md:
         return 0
 
-    # 1) Build full sections with heading paths
     sections = _split_markdown_into_sections(md)
     if not sections:
         return 0
-
-    # Optional safety cap for pathological docs
     if len(sections) > 3000:
         sections = sections[:3000]
 
-    # 2) TRIAGE pass: decide which sections to pursue
-    # Batch triage to keep prompts bounded
     keep_sec_idxs: List[int] = []
     for b0 in range(0, len(sections), SECTION_TRIAGE_BATCH):
         batch = sections[b0 : b0 + SECTION_TRIAGE_BATCH]
@@ -1535,13 +1508,9 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
     if not keep_set:
         return 0
 
-    created_at = _utc_iso_z()
-    stored = 0
+    # Build rec list in memory (no DB rec table)
+    recs: List[Dict[str, str]] = []
     seen = set()
-
-    # 3) For each kept section: store as an element + extract recommendations from full section
-    # NOTE: storage function lives in db.py; imported lazily to avoid circular imports.
-    from db import insert_guideline_element, insert_guideline_recommendation
 
     for s in sections:
         try:
@@ -1556,61 +1525,45 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, progres
         if not content:
             continue
 
-        # store section as a guideline_element (best-effort) for audit/debug
-        sec_blob = f"PATH: {path}\n\n{content}".strip()
-        sec_hash = _hash_text(sec_blob)
-        try:
-            insert_guideline_element(gid, sec_idx, "section", sec_blob[:GUIDELINE_ELEMENT_MAX_CHARS], sec_hash)
-        except Exception:
-            pass
-
-        # 4) EXTRACT pass: send the whole section (or split into parts if huge)
         parts = _split_large_section(content, max_chars=SECTION_MAX_CHARS_SEND, overlap=SECTION_PART_OVERLAP_CHARS)
         for pi, part in enumerate(parts, start=1):
             part_path = path if len(parts) == 1 else f"{path} (part {pi}/{len(parts)})"
             try:
-                recos = _openai_extract_recos_from_section(part, part_path)
+                extracted = _openai_extract_recos_from_section(part, part_path)
             except Exception:
-                recos = []
+                extracted = []
 
-            if not recos:
-                continue
-
-            for rco in recos:
+            for rco in extracted:
                 rec_text = (rco.get("recommendation_text") or "").strip()
                 if not rec_text:
                     continue
-
                 strength = (rco.get("strength_raw") or "").strip()
                 evidence = (rco.get("evidence_raw") or "").strip()
                 snippet = (rco.get("source_snippet") or "").strip()
 
-                # Light dedupe
                 dedupe_key = (rec_text.lower(), strength.lower(), evidence.lower())
                 if dedupe_key in seen:
                     continue
                 seen.add(dedupe_key)
 
-                # Persist; put heading path into snippet for downstream visibility
                 snip_final = f"[{path}] {snippet}".strip() if snippet else f"[{path}]".strip()
+                recs.append(
+                    {
+                        "recommendation_text": rec_text,
+                        "strength_raw": strength,
+                        "evidence_raw": evidence,
+                        "source_snippet": snip_final,
+                    }
+                )
 
-                try:
-                    insert_guideline_recommendation(
-                        guideline_id=gid,
-                        idx=int(sec_idx),
-                        recommendation_text=rec_text,
-                        strength_raw=strength or None,
-                        evidence_raw=evidence or None,
-                        source_snippet=snip_final or None,
-                        element_hash=sec_hash,
-                        created_at=created_at,
-                    )
-                    stored += 1
-                except Exception:
-                    pass
+    if not recs:
+        return 0
 
-    return stored
+    meta_now = get_guideline_meta(gid) or {}
+    disp_md = gpt_generate_guideline_recommendations_display(recs, meta_now)
+    update_guideline_recommendations_display(gid, disp_md)
 
+    return len(recs)
 
 
 # ---------------- Guideline metadata extraction ----------------
@@ -1716,17 +1669,16 @@ def gpt_extract_guideline_title_year(filename: str, snippet: str) -> Dict[str, s
         "pub_year": (obj.get("pub_year") or "").strip(),
     }
 
-
-def extract_and_store_guideline_metadata_azure(guideline_id: str) -> Dict[str, str]:
+def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: bytes) -> Dict[str, str]:
     gid = (guideline_id or "").strip()
     if not gid:
         return {}
 
-    meta = get_guideline_meta(gid)
+    meta = get_guideline_meta(gid) or {}
     if not meta:
         return {}
 
-    md = get_or_create_markdown(gid)
+    md = markdown_from_pdf_bytes(pdf_bytes)
     if not md:
         return {}
 
@@ -1748,7 +1700,6 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str) -> Dict[str, s
     except Exception:
         spec = ""
 
-    # don't wipe manual values if extraction yields blanks
     existing = get_guideline_meta(gid) or {}
     final_name = (gname or "").strip() or (existing.get("guideline_name") or "").strip()
     final_year = (year or "").strip() or (existing.get("pub_year") or "").strip()

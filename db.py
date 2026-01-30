@@ -291,7 +291,7 @@ def ensure_guidelines_schema() -> None:
             CREATE TABLE IF NOT EXISTS guidelines (
                 guideline_id TEXT PRIMARY KEY,
                 filename TEXT NOT NULL,
-                stored_path TEXT NOT NULL,
+                stored_path TEXT NOT NULL,          -- kept for compatibility; always '' in ultra-minimal
                 sha256 TEXT NOT NULL,
                 bytes INTEGER NOT NULL,
                 uploaded_at TEXT NOT NULL,
@@ -301,92 +301,14 @@ def ensure_guidelines_schema() -> None:
                 meta_extracted_at TEXT,
                 recommendations_display_md TEXT,
                 recommendations_display_updated_at TEXT
-
             );
             """
         )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_sha256 ON guidelines(sha256);")
+        # Dedupe + browse/search helpers
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_guidelines_sha256_uq ON guidelines(sha256);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_uploaded_at ON guidelines(uploaded_at);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_pub_year ON guidelines(pub_year);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_specialty ON guidelines(specialty);")
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guideline_layout (
-                guideline_id TEXT PRIMARY KEY,
-                sha256 TEXT NOT NULL,
-                markdown TEXT NOT NULL,
-                analyzed_at TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_layout_sha ON guideline_layout(sha256);")
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guideline_elements (
-                element_id TEXT PRIMARY KEY,
-                guideline_id TEXT NOT NULL,
-                idx INTEGER NOT NULL,
-                kind TEXT NOT NULL,
-                content TEXT NOT NULL,
-                content_hash TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_elements_gid ON guideline_elements(guideline_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_elements_hash ON guideline_elements(content_hash);")
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS guideline_recommendations (
-                rec_id TEXT PRIMARY KEY,
-                guideline_id TEXT NOT NULL,
-                idx INTEGER NOT NULL,
-                recommendation_text TEXT NOT NULL,
-                strength_raw TEXT,
-                evidence_raw TEXT,
-                source_snippet TEXT,
-                element_hash TEXT NOT NULL,
-                relevance_status TEXT NOT NULL DEFAULT 'unreviewed',
-                created_at TEXT NOT NULL,
-                updated_at TEXT
-            );
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_recs_gid ON guideline_recommendations(guideline_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_recs_elemhash ON guideline_recommendations(element_hash);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_guideline_recs_status ON guideline_recommendations(relevance_status);")
-
-        # Backwards-compatible migrations (idempotent)
-        gcols = {row["name"] for row in conn.execute("PRAGMA table_info(guidelines);").fetchall()}
-        for col, ddl in [
-            ("guideline_name", "ALTER TABLE guidelines ADD COLUMN guideline_name TEXT;"),
-            ("pub_year", "ALTER TABLE guidelines ADD COLUMN pub_year TEXT;"),
-            ("specialty", "ALTER TABLE guidelines ADD COLUMN specialty TEXT;"),
-            ("meta_extracted_at", "ALTER TABLE guidelines ADD COLUMN meta_extracted_at TEXT;"),
-            ("recommendations_display_md", "ALTER TABLE guidelines ADD COLUMN recommendations_display_md TEXT;"),
-            ("recommendations_display_updated_at", "ALTER TABLE guidelines ADD COLUMN recommendations_display_updated_at TEXT;"),
-        ]:
-            if col not in gcols:
-                conn.execute(ddl)
-
-        rcols = {row["name"] for row in conn.execute("PRAGMA table_info(guideline_recommendations);").fetchall()}
-        if "relevance_status" not in rcols:
-            conn.execute("ALTER TABLE guideline_recommendations ADD COLUMN relevance_status TEXT;")
-        if "updated_at" not in rcols:
-            conn.execute("ALTER TABLE guideline_recommendations ADD COLUMN updated_at TEXT;")
-        try:
-            conn.execute("UPDATE guideline_recommendations SET relevance_status='unreviewed' WHERE relevance_status IS NULL;")
-        except Exception:
-            pass
-
-        # Convert any legacy values to the new canonical ones
-        try:
-            conn.execute("UPDATE guideline_recommendations SET relevance_status='active' WHERE relevance_status='relevant';")
-            conn.execute("UPDATE guideline_recommendations SET relevance_status='passive' WHERE relevance_status='irrelevant';")
-        except Exception:
-            pass
 
 
 def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
@@ -397,7 +319,8 @@ def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
         row = conn.execute(
             """
             SELECT guideline_id, filename, stored_path, sha256, bytes, uploaded_at,
-                   guideline_name, pub_year, specialty, meta_extracted_at
+                   guideline_name, pub_year, specialty, meta_extracted_at,
+                   recommendations_display_md, recommendations_display_updated_at
             FROM guidelines
             WHERE sha256=?
             LIMIT 1;
@@ -417,8 +340,9 @@ def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
             "pub_year": (row["pub_year"] or "").strip(),
             "specialty": (row["specialty"] or "").strip(),
             "meta_extracted_at": (row["meta_extracted_at"] or "").strip(),
+            "recommendations_display_md": (row["recommendations_display_md"] or "").strip(),
+            "recommendations_display_updated_at": (row["recommendations_display_updated_at"] or "").strip(),
         }
-
 
 def save_guideline_pdf(filename: str, pdf_bytes: bytes) -> Dict[str, str]:
     if not pdf_bytes:
@@ -431,30 +355,23 @@ def save_guideline_pdf(filename: str, pdf_bytes: bytes) -> Dict[str, str]:
         return existing
 
     gid = uuid.uuid4().hex
-    os.makedirs(_guidelines_dir(), exist_ok=True)
-    stored_path = os.path.join(_guidelines_dir(), f"{gid}.pdf")
-
-    tmp_path = stored_path + ".tmp"
-    with open(tmp_path, "wb") as f:
-        f.write(pdf_bytes)
-    os.replace(tmp_path, stored_path)
-
     uploaded_at = _utc_iso_z()
     nbytes = int(len(pdf_bytes))
 
+    # Ultra-minimal: never store PDF; keep stored_path as ''.
     with _connect_db() as conn:
         conn.execute(
             """
             INSERT INTO guidelines (guideline_id, filename, stored_path, sha256, bytes, uploaded_at)
             VALUES (?, ?, ?, ?, ?, ?);
             """,
-            (gid, fn, stored_path, sha, nbytes, uploaded_at),
+            (gid, fn, "", sha, nbytes, uploaded_at),
         )
 
     return {
         "guideline_id": gid,
         "filename": fn,
-        "stored_path": stored_path,
+        "stored_path": "",
         "sha256": sha,
         "bytes": str(nbytes),
         "uploaded_at": uploaded_at,
@@ -462,6 +379,8 @@ def save_guideline_pdf(filename: str, pdf_bytes: bytes) -> Dict[str, str]:
         "pub_year": "",
         "specialty": "",
         "meta_extracted_at": "",
+        "recommendations_display_md": "",
+        "recommendations_display_updated_at": "",
     }
 
 
@@ -516,45 +435,11 @@ def read_guideline_pdf_bytes(guideline_id: str) -> bytes:
 
 
 def delete_guideline(guideline_id: str) -> None:
-    """Delete a guideline and all derived extracted content + remove the stored PDF (best-effort)."""
     gid = (guideline_id or "").strip()
     if not gid:
         return
-
-    stored_path = ""
     with _connect_db() as conn:
-        row = conn.execute(
-            "SELECT stored_path FROM guidelines WHERE guideline_id=? LIMIT 1;",
-            (gid,),
-        ).fetchone()
-        if row:
-            stored_path = (row["stored_path"] or "").strip()
-
-        # Derived content first
-        conn.execute("DELETE FROM guideline_elements WHERE guideline_id=?;", (gid,))
-        conn.execute("DELETE FROM guideline_recommendations WHERE guideline_id=?;", (gid,))
-        conn.execute("DELETE FROM guideline_layout WHERE guideline_id=?;", (gid,))
         conn.execute("DELETE FROM guidelines WHERE guideline_id=?;", (gid,))
-
-    # Best-effort remove stored PDF from disk (guarded to guidelines dir)
-    try:
-        if stored_path:
-            gdir = os.path.abspath(_guidelines_dir())
-            pabs = os.path.abspath(stored_path)
-            if pabs.startswith(gdir + os.sep) and os.path.exists(pabs):
-                os.remove(pabs)
-    except Exception:
-        pass
-
-    # Best-effort remove any sidecar cache files if present
-    try:
-        md_dir = os.path.abspath(_guidelines_md_dir())
-        for ext in (".md", ".json", ".txt"):
-            p = os.path.join(md_dir, f"{gid}{ext}")
-            if p.startswith(md_dir + os.sep) and os.path.exists(p):
-                os.remove(p)
-    except Exception:
-        pass
 
 
 def purge_guideline_pdf(guideline_id: str) -> None:
@@ -904,7 +789,6 @@ def list_browse_guideline_items(limit: int) -> List[Dict[str, str]]:
         )
     return out
 
-
 def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
     raw = (q or "").strip()
     if not raw:
@@ -919,6 +803,7 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
         "COALESCE(g.filename,'')",
         "COALESCE(g.pub_year,'')",
         "COALESCE(g.specialty,'')",
+        "COALESCE(g.recommendations_display_md,'')",
     ]
 
     where_parts: List[str] = []
@@ -926,13 +811,8 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
     for tok in tokens:
         like = f"%{tok}%"
         ors = " OR ".join([f"{c} LIKE ?" for c in gcols])
-        exists = (
-            "EXISTS (SELECT 1 FROM guideline_recommendations r "
-            "WHERE r.guideline_id = g.guideline_id AND COALESCE(r.recommendation_text,'') LIKE ?)"
-        )
-        where_parts.append(f"(({ors}) OR {exists})")
+        where_parts.append(f"({ors})")
         params.extend([like] * len(gcols))
-        params.append(like)
 
     where_sql = " AND ".join(where_parts)
 

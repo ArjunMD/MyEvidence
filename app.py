@@ -28,13 +28,10 @@ from db import (
     save_guideline_pdf,
     list_guidelines,
     get_guideline_meta,
-    list_guideline_recommendations,
     update_guideline_metadata,
     list_recent_records,
     get_guideline_recommendations_display,
     update_guideline_recommendations_display,
-    purge_guideline_pdf,
-
 )
 from extract import (
     fetch_pubmed_xml,
@@ -42,7 +39,6 @@ from extract import (
     parse_year,
     parse_journal,
     parse_title,
-    get_or_create_markdown,
     get_top_neighbors,
     get_s2_similar_papers,
     gpt_extract_patient_n,
@@ -62,7 +58,6 @@ from extract import (
     _openai_model,
     _post_with_retries,
     _extract_output_text,
-    gpt_generate_guideline_recommendations_display,
     OPENAI_RESPONSES_URL,
 )
 
@@ -175,64 +170,25 @@ def _year_sort_key(y: str) -> Tuple[int, str]:
 
 # --------------- Meta synthesis helpers (papers + guidelines) ---------------
 
-def _pack_guideline_for_meta(gid: str, idx: int, max_recs: int = 999999) -> str:
-    """
-    Construct a block of text representing a guideline for the meta synthesis prompt.
-
-    This uses the guideline's metadata (name/year/specialty) and the text of its
-    recommendations. All recommendations are included regardless of their review
-    status (active, unreviewed or passive). Strength and evidence descriptors
-    are appended parenthetically when present and not already present in the
-    recommendation text. At most ``max_recs`` recommendations are included to
-    keep the prompt concise.
-    """
+def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
     gid = (gid or "").strip()
     if not gid:
         return ""
-    # Fetch guideline metadata (name, year, specialty)
+
     meta = get_guideline_meta(gid) or {}
     name = (meta.get("guideline_name") or meta.get("filename") or "").strip()
     year = (meta.get("pub_year") or "").strip()
     spec = (meta.get("specialty") or "").strip()
-    # Compose header line
-    header_bits: List[str] = []
-    if name:
-        header_bits.append(name)
-    else:
-        header_bits.append(f"Guideline {gid}")
-    if year:
-        header_bits.append(year)
-    if spec:
-        header_bits.append(spec)
+
+    header_bits: List[str] = [b for b in [name or f"Guideline {gid}", year, spec] if b]
     header = f"{idx}. " + " • ".join(header_bits)
-    # Collect recommendations
-    recs = list_guideline_recommendations(gid)
-    lines: List[str] = []
-    count = 0
-    for r in recs:
-        # Do not filter by review status; include active, unreviewed, and passive recommendations
-        rec_text = (r.get("recommendation_text") or "").strip()
-        if not rec_text:
-            continue
-        strength = (r.get("strength_raw") or "").strip()
-        evidence = (r.get("evidence_raw") or "").strip()
-        # Append strength/evidence parenthetically if not already in text
-        extra_bits: List[str] = []
-        for s in [strength, evidence]:
-            if s and (s.lower() not in rec_text.lower()):
-                extra_bits.append(s)
-        if extra_bits:
-            full_text = f"{rec_text} ({'; '.join(extra_bits)})"
-        else:
-            full_text = rec_text
-        lines.append(f"- {full_text}")
-        count += 1
-        if count >= max_recs:
-            break
-    if not lines:
-        # No usable recommendations; just return header
-        return header
-    return f"{header}\n" + "\n".join(lines)
+
+    disp = (get_guideline_recommendations_display(gid) or "").strip()
+    if not disp:
+        return header + "\n- (No saved recommendations display.)"
+
+    disp = disp[:max_chars] + ("…" if len(disp) > max_chars else "")
+    return f"{header}\n\n{disp}"
 
 
 def gpt_generate_meta_combined(
@@ -982,18 +938,18 @@ elif page == "DB Search":
         gid = (selected.get("guideline_id") or "").strip()
         meta = get_guideline_meta(gid) or {}
         title = (meta.get("guideline_name") or "").strip() or (meta.get("filename") or "").strip() or (selected.get("title") or "")
-        # st.subheader(f"📘 {title}")
+        st.subheader(f"📘 {title}")
 
-        # # Show guideline metadata (optional)
-        # bits = []
-        # y = (meta.get("pub_year") or "").strip()
-        # s = (meta.get("specialty") or "").strip()
-        # if y:
-        #     bits.append(y)
-        # if s:
-        #     bits.append(s)
-        # if bits:
-        #     st.caption(" • ".join(bits))
+        # Show guideline metadata (optional)
+        bits = []
+        y = (meta.get("pub_year") or "").strip()
+        s = (meta.get("specialty") or "").strip()
+        if y:
+            bits.append(y)
+        if s:
+            bits.append(s)
+        if bits:
+            st.caption(" • ".join(bits))
 
         st.divider()
 
@@ -1003,16 +959,7 @@ elif page == "DB Search":
             st.markdown(disp)
         else:
             st.info("No clinician-friendly recommendations display saved for this guideline yet.")
-            recs = list_guideline_recommendations(gid)
-            if recs and st.button("Generate recommendations display", type="primary", width="stretch", key=f"dbsearch_guideline_gen_{gid}"):
-                try:
-                    with st.spinner("Generating…"):
-                        new_md = gpt_generate_guideline_recommendations_display(recs, meta)
-                    update_guideline_recommendations_display(gid, new_md)
-                    st.success("Generated.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(str(e))
+
 
  
 
@@ -1169,6 +1116,15 @@ elif page == "Guidelines (PDF Upload)":
                 with st.spinner("Saving PDF…"):
                     rec = save_guideline_pdf(up.name, pdf_bytes)
                 gid_saved = (rec.get("guideline_id") or "").strip()
+
+                # Ultra-minimal dedupe behavior:
+                # If this exact PDF was uploaded before AND we already have a final display, do nothing.
+                existing_disp = (get_guideline_recommendations_display(gid_saved) or "").strip()
+                if existing_disp:
+                    st.session_state["guidelines_last_saved"] = gid_saved
+                    st.info("This PDF already exists in your database (final display already saved). Skipping extraction.")
+                    st.rerun()
+
                 if not gid_saved:
                     st.error("Save succeeded but returned no guideline_id.")
                     st.stop()
@@ -1177,7 +1133,7 @@ elif page == "Guidelines (PDF Upload)":
                 extracted_meta: Dict[str, str] = {}
                 try:
                     with st.spinner("Extracting metadata (name/year/specialty)…"):
-                        outm = extract_and_store_guideline_metadata_azure(gid_saved)
+                        outm = extract_and_store_guideline_metadata_azure(gid_saved, pdf_bytes)
                     if isinstance(outm, dict):
                         extracted_meta = {
                             "gid": gid_saved,
@@ -1189,10 +1145,10 @@ elif page == "Guidelines (PDF Upload)":
                     extracted_meta = {}
 
                 # Recommendations: only extract if none exist
-                existing_now = list_guideline_recommendations(gid_saved)
                 n_recs = 0
-                if existing_now:
-                    st.info("This guideline already has extracted recommendations; skipping extraction. Use the Re-extract (overwrite) section below if you want to overwrite.")
+                disp_now = (get_guideline_recommendations_display(gid_saved) or "").strip()
+                if disp_now:
+                    st.info("This guideline already has a saved recommendations display; skipping extraction.")
                 else:
                     prog = st.progress(0)
                     status = st.empty()
@@ -1201,44 +1157,11 @@ elif page == "Guidelines (PDF Upload)":
                         if total <= 0:
                             return
                         prog.progress(min(1.0, max(0.0, done / float(total))))
-                        status.write(f"Processing candidate {done} / {total} …")
+                        status.write(f"Triaging sections {done} / {total} …")
 
-                    with st.spinner("Extracting recommendations…"):
-                        n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, progress_cb=_cb)
+                    with st.spinner("Extracting recommendations + generating final display…"):
+                        n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, pdf_bytes, progress_cb=_cb)
 
-                st.session_state["guidelines_last_saved"] = gid_saved
-                if extracted_meta:
-                    st.session_state["guideline_meta_pending"] = extracted_meta
-
-                # ----  Generate clinician-friendly recommendations display once ----
-                try:
-                    existing_disp = (get_guideline_recommendations_display(gid_saved) or "").strip()
-                    if not existing_disp:
-                        recs_now = list_guideline_recommendations(gid_saved)
-                        if recs_now:
-                            meta_now = get_guideline_meta(gid_saved) or {}
-                            with st.spinner("Generating clinician-friendly recommendations display…"):
-                                disp_md = gpt_generate_guideline_recommendations_display(recs_now, meta_now)
-                            update_guideline_recommendations_display(gid_saved, disp_md)
-                except Exception:
-                    # Best-effort; don't fail upload flow if display generation fails
-                    pass
-
-                # ---- Always cache markdown, then always purge PDF ----
-                # This prevents disk growth in data/guidelines/*.pdf while keeping future extraction possible.
-                with st.spinner("Caching markdown (required before purging PDF)…"):
-                    md_cached = (get_or_create_markdown(gid_saved) or "").strip()
-                    if not md_cached:
-                        raise RuntimeError(
-                            "Could not cache markdown for this guideline, so the PDF was NOT purged. "
-                            "Check Azure DI configuration/logs."
-                        )
-
-                try:
-                    purge_guideline_pdf(gid_saved)
-                except Exception:
-                    # Best-effort: don't fail the whole flow if purge fails
-                    pass
 
                 st.success(f"Done. Guideline ID: `{gid_saved}` • Stored recommendations: {n_recs if n_recs else '—'}")
                 st.rerun()
@@ -1319,34 +1242,9 @@ elif page == "Guidelines (PDF Upload)":
                 except Exception as e:
                     st.error(f"Failed to save metadata: {e}")
 
-        if st.button("Extract metadata", type="secondary", width="stretch", key="guideline_meta_extract"):
-            try:
-                with st.spinner("Extracting guideline name/year/specialty…"):
-                    out = extract_and_store_guideline_metadata_azure(gid)
-
-                if isinstance(out, dict):
-                    st.session_state["guideline_meta_pending"] = {
-                        "gid": gid,
-                        "name": str(out.get("guideline_name") or "").strip(),
-                        "year": str(out.get("pub_year") or "").strip(),
-                        "spec": str(out.get("specialty") or "").strip(),
-                    }
-
-                st.success("Metadata extracted.")
-                st.rerun()
-            except Exception as e:
-                st.error(str(e))
-
     meta = get_guideline_meta(gid)
 
     st.divider()
-
-    recs = list_guideline_recommendations(gid)
-    if not recs:
-        st.info("No recommendations extracted yet.")
-        st.stop()
-
-    st.subheader("Recommendation review")
 
      # =======================
     # Clinician-friendly display (editable)
@@ -1369,26 +1267,13 @@ elif page == "Guidelines (PDF Upload)":
         placeholder="Click Generate to create a sectioned, clinician-friendly display. You can then edit freely and Save.",
     )
 
-    cA, cB, cC = st.columns([1, 1, 2], gap="large")
+    cA, cC = st.columns([1, 2], gap="large")
 
     with cA:
         if st.button("Save display", type="primary", width="stretch", key=f"guideline_disp_save_{gid}"):
             try:
                 update_guideline_recommendations_display(gid, st.session_state.get("guideline_display_md") or "")
                 st.success("Display saved.")
-            except Exception as e:
-                st.error(str(e))
-
-    with cB:
-        if st.button("Generate / Regenerate", type="secondary", width="stretch", key=f"guideline_disp_regen_{gid}"):
-            try:
-                meta_now = get_guideline_meta(gid) or {}
-                with st.spinner("Generating…"):
-                    new_md = gpt_generate_guideline_recommendations_display(recs, meta_now)
-                st.session_state["guideline_display_md"] = new_md
-                update_guideline_recommendations_display(gid, new_md)
-                st.success("Generated.")
-                st.rerun()
             except Exception as e:
                 st.error(str(e))
 
@@ -1713,9 +1598,6 @@ elif page == "Delete":
             year = (r.get("year") or r.get("pub_year") or "").strip()
             specialty = (r.get("specialty") or "").strip()
             guidelines.append({"guideline_id": gid, "title": title, "year": year, "specialty": specialty})
-
-        if not guidelines:
-            st.info("No saved guidelines found.")
 
         # Helper for guideline label.
         def _guideline_label(r: Dict[str, str]) -> str:
