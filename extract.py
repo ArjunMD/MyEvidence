@@ -556,7 +556,8 @@ _GUIDELINE_SECTION_CHOICES = [
     "Therapeutic procedures",
     "Cautions / Contraindications",
     "Monitoring",
-    "Prevention",
+    "Post-hospitalization care",
+    "Secondary prevention",
     "Patient education",
     "Special populations",
 ]
