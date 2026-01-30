@@ -1150,14 +1150,14 @@ elif page == "Guidelines (PDF Upload)":
                 if disp_now:
                     st.info("This guideline already has a saved recommendations display; skipping extraction.")
                 else:
-                    prog = st.progress(0)
                     status = st.empty()
 
-                    def _cb(done, total):
-                        if total <= 0:
-                            return
-                        prog.progress(min(1.0, max(0.0, done / float(total))))
-                        status.write(f"Triaging sections {done} / {total} …")
+                    def _cb(done, total, msg="Processing…"):
+                        # total is intentionally ignored; we only show a phase + counts when available
+                        if total and total > 0:
+                            status.write(f"{msg} ({done}/{total})")
+                        else:
+                            status.write(msg)
 
                     with st.spinner("Extracting recommendations + generating final display…"):
                         n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, pdf_bytes, progress_cb=_cb)

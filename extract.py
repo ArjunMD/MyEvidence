@@ -231,11 +231,6 @@ def _requests_session() -> requests.Session:
     s.headers.update({"User-Agent": ua})
     return s
 
-
-def _utc_iso_z() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
 # ---------------- NCBI fetch + parse ----------------
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -434,7 +429,6 @@ def _openai_api_key() -> str:
 
 def _openai_model() -> str:
     return ("gpt-5.2")
-
 
 
 # ---------------- Semantic Scholar helpers ----------------
