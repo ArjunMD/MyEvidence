@@ -298,7 +298,7 @@ def ensure_guidelines_schema() -> None:
                 guideline_name TEXT,
                 pub_year TEXT,
                 specialty TEXT,
-                meta_extracted_at TEXT
+                meta_extracted_at TEXT,
                 recommendations_display_md TEXT,
                 recommendations_display_updated_at TEXT
 
