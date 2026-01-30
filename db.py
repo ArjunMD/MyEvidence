@@ -9,21 +9,11 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 DB_PATH = "data/papers.db"
-GUIDELINES_DIR = "data/guidelines"
-GUIDELINES_MD_DIR = "data/guidelines_md"
 
 # ---------------- Local DB paths / connection ----------------
 
 def _db_path() -> str:
     return DB_PATH
-
-
-def _guidelines_dir() -> str:
-    return GUIDELINES_DIR
-
-
-def _guidelines_md_dir() -> str:
-    return GUIDELINES_MD_DIR
 
 def _connect_db() -> sqlite3.Connection:
     path = _db_path()
@@ -439,67 +429,12 @@ def list_guidelines(limit: int) -> List[Dict[str, str]]:
         )
     return out
 
-
-def read_guideline_pdf_bytes(guideline_id: str) -> bytes:
-    gid = (guideline_id or "").strip()
-    if not gid:
-        return b""
-    with _connect_db() as conn:
-        row = conn.execute(
-            "SELECT stored_path FROM guidelines WHERE guideline_id=? LIMIT 1;",
-            (gid,),
-        ).fetchone()
-        if not row:
-            return b""
-        path = (row["stored_path"] or "").strip()
-    if not path or not os.path.exists(path):
-        return b""
-    with open(path, "rb") as f:
-        return f.read()
-
-
 def delete_guideline(guideline_id: str) -> None:
     gid = (guideline_id or "").strip()
     if not gid:
         return
     with _connect_db() as conn:
         conn.execute("DELETE FROM guidelines WHERE guideline_id=?;", (gid,))
-
-
-def purge_guideline_pdf(guideline_id: str) -> None:
-    """
-    Delete the stored PDF from disk (best-effort) and clear stored_path.
-    Keeps extracted content + cached markdown in SQLite.
-    """
-    gid = (guideline_id or "").strip()
-    if not gid:
-        return
-
-    stored_path = ""
-    with _connect_db() as conn:
-        row = conn.execute(
-            "SELECT stored_path FROM guidelines WHERE guideline_id=? LIMIT 1;",
-            (gid,),
-        ).fetchone()
-        if not row:
-            return
-        stored_path = (row["stored_path"] or "").strip()
-
-        # Keep row, just clear the path (stored_path is NOT NULL, so use empty string)
-        conn.execute(
-            "UPDATE guidelines SET stored_path='' WHERE guideline_id=?;",
-            (gid,),
-        )
-
-    # Best-effort remove stored PDF from disk (guarded to guidelines dir)
-    try:
-        if stored_path:
-            gdir = os.path.abspath(_guidelines_dir())
-            pabs = os.path.abspath(stored_path)
-            if pabs.startswith(gdir + os.sep) and os.path.exists(pabs):
-                os.remove(pabs)
-    except Exception:
-        pass
 
 
 # ---------------- Guideline layout markdown cache ----------------
@@ -564,194 +499,7 @@ def update_guideline_recommendations_display(guideline_id: str, markdown: str) -
             (md, now, gid),
         )
 
-
-def get_cached_layout_markdown(guideline_id: str, sha256: str) -> str:
-    gid = (guideline_id or "").strip()
-    sha = (sha256 or "").strip()
-    if not gid or not sha:
-        return ""
-    with _connect_db() as conn:
-        row = conn.execute(
-            "SELECT markdown FROM guideline_layout WHERE guideline_id=? AND sha256=? LIMIT 1;",
-            (gid, sha),
-        ).fetchone()
-        return (row["markdown"] or "") if row else ""
-
-
-def save_layout_markdown(guideline_id: str, sha256: str, markdown: str) -> None:
-    gid = (guideline_id or "").strip()
-    sha = (sha256 or "").strip()
-    md = (markdown or "").strip()
-    if not gid or not sha or not md:
-        return
-    analyzed_at = _utc_iso_z()
-    with _connect_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO guideline_layout (guideline_id, sha256, markdown, analyzed_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(guideline_id) DO UPDATE SET
-                sha256=excluded.sha256,
-                markdown=excluded.markdown,
-                analyzed_at=excluded.analyzed_at;
-            """,
-            (gid, sha, md, analyzed_at),
-        )
-
-# ---------------- Guideline element + recommendation inserts (used by extract.py) ----------------
-
-def _stable_guideline_element_id(guideline_id: str, idx: int, content_hash: str) -> str:
-    """
-    Deterministic ID so re-running extraction doesn't duplicate the same element.
-    """
-    gid = (guideline_id or "").strip()
-    ch = (content_hash or "").strip()
-    key = f"{gid}|{int(idx)}|{ch}".encode("utf-8", errors="ignore")
-    return hashlib.sha256(key).hexdigest()
-
-
-def insert_guideline_element(
-    guideline_id: str,
-    idx: int,
-    kind: str,
-    content: str,
-    content_hash: str,
-) -> None:
-    """
-    Best-effort store of parsed markdown elements for debugging/auditing extraction.
-    Safe to call repeatedly; duplicates are ignored.
-    """
-    gid = (guideline_id or "").strip()
-    if not gid:
-        return
-
-    k = (kind or "").strip() or "text"
-    c = (content or "").strip()
-    ch = (content_hash or "").strip()
-    if not c or not ch:
-        return
-
-    element_id = _stable_guideline_element_id(gid, int(idx), ch)
-
-    with _connect_db() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO guideline_elements (
-                element_id, guideline_id, idx, kind, content, content_hash
-            )
-            VALUES (?, ?, ?, ?, ?, ?);
-            """,
-            (element_id, gid, int(idx), k, c, ch),
-        )
-
-
-def _stable_guideline_rec_id(guideline_id: str, element_hash: str, recommendation_text: str) -> str:
-    """
-    Deterministic ID so re-running extraction doesn't duplicate the same recommendation.
-    """
-    gid = (guideline_id or "").strip()
-    eh = (element_hash or "").strip()
-    rt = (recommendation_text or "").strip().lower()
-    key = f"{gid}|{eh}|{rt}".encode("utf-8", errors="ignore")
-    return hashlib.sha256(key).hexdigest()
-
-
-def insert_guideline_recommendation(
-    guideline_id: str,
-    idx: int,
-    recommendation_text: str,
-    strength_raw: Optional[str],
-    evidence_raw: Optional[str],
-    source_snippet: Optional[str],
-    element_hash: str,
-    created_at: str,
-) -> None:
-    """
-    Insert a recommendation extracted from a candidate element.
-    Safe to call repeatedly; duplicates are ignored.
-    """
-    gid = (guideline_id or "").strip()
-    if not gid:
-        return
-
-    rec_text = (recommendation_text or "").strip()
-    if not rec_text:
-        return
-
-    eh = (element_hash or "").strip()
-    if not eh:
-        return
-
-    rid = _stable_guideline_rec_id(gid, eh, rec_text)
-
-    with _connect_db() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO guideline_recommendations (
-                rec_id,
-                guideline_id,
-                idx,
-                recommendation_text,
-                strength_raw,
-                evidence_raw,
-                source_snippet,
-                element_hash,
-                relevance_status,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unreviewed', ?, NULL);
-            """,
-            (
-                rid,
-                gid,
-                int(idx),
-                rec_text,
-                (strength_raw or "").strip() or None,
-                (evidence_raw or "").strip() or None,
-                (source_snippet or "").strip() or None,
-                eh,
-                (created_at or "").strip() or _utc_iso_z(),
-            ),
-        )
-
-
 # ---------------- Guideline recommendations + review state ----------------
-
-def list_guideline_recommendations(guideline_id: str, limit: int = 2000) -> List[Dict[str, str]]:
-    gid = (guideline_id or "").strip()
-    if not gid:
-        return []
-    with _connect_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT rec_id, idx, recommendation_text, strength_raw, evidence_raw,
-                   source_snippet, relevance_status, created_at, updated_at
-            FROM guideline_recommendations
-            WHERE guideline_id=?
-            ORDER BY idx ASC
-            LIMIT ?;
-            """,
-            (gid, int(limit)),
-        ).fetchall()
-
-    out: List[Dict[str, str]] = []
-    for r in rows:
-        out.append(
-            {
-                "rec_id": (r["rec_id"] or "").strip(),
-                "idx": str(int(r["idx"])) if r["idx"] is not None else "0",
-                "recommendation_text": (r["recommendation_text"] or "").strip(),
-                "strength_raw": (r["strength_raw"] or "").strip(),
-                "evidence_raw": (r["evidence_raw"] or "").strip(),
-                "source_snippet": (r["source_snippet"] or "").strip(),
-                "relevance_status": (r["relevance_status"] or "").strip(),
-                "created_at": (r["created_at"] or "").strip(),
-                "updated_at": (r["updated_at"] or "").strip(),
-            }
-        )
-    return out
-
 
 def update_guideline_metadata(
     guideline_id: str,

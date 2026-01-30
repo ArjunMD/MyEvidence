@@ -29,7 +29,6 @@ from db import (
     get_guideline_meta,
     update_guideline_metadata,
     update_guideline_recommendations_display,
-    get_record,
 )
 
 # ---------------- Constants ----------------
@@ -42,8 +41,6 @@ NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 NCBI_ELINK_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
 NCBI_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-
-GUIDELINE_ELEMENT_MAX_CHARS = 4500
 
 GUIDELINE_OPENAI_STRICTNESS = "medium"  # "strict" | "medium" | "loose"
 
@@ -62,7 +59,6 @@ _LOE_HINT_RE = re.compile(
     r"(?i)\b(level of evidence|loe|class\b|grade\b|grading\b|certainty|strong recommendation|conditional recommendation)\b"
 )
 
-META_MAX_STUDIES_HARD_CAP = 25
 META_MAX_CHARS_PER_STUDY = 10000
 
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
@@ -1281,13 +1277,6 @@ def markdown_from_pdf_bytes(pdf_bytes: bytes) -> str:
     if not pdf_bytes:
         return ""
     return (analyze_pdf_to_markdown_azure(pdf_bytes) or "").strip()
-
-def _hash_text(s: str) -> str:
-    import hashlib
-    h = hashlib.sha256()
-    h.update((s or "").encode("utf-8", errors="ignore"))
-    return h.hexdigest()
-
 
 # ---------------- Guideline extraction: OpenAI recos from elements ----------------
 
