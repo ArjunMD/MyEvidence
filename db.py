@@ -113,6 +113,30 @@ def db_count() -> int:
         return int(row["c"]) if row else 0
 
 
+def guidelines_count() -> int:
+    # Safe even if the guidelines table doesn't exist yet.
+    with _connect_db() as conn:
+        try:
+            row = conn.execute("SELECT COUNT(*) AS c FROM guidelines;").fetchone()
+        except sqlite3.OperationalError:
+            return 0
+        return int(row["c"]) if row else 0
+
+
+def db_count_all() -> int:
+    # Count papers + guidelines in one connection.
+    with _connect_db() as conn:
+        row_p = conn.execute("SELECT COUNT(*) AS c FROM abstracts;").fetchone()
+        papers = int(row_p["c"]) if row_p else 0
+
+        try:
+            row_g = conn.execute("SELECT COUNT(*) AS c FROM guidelines;").fetchone()
+            guidelines = int(row_g["c"]) if row_g else 0
+        except sqlite3.OperationalError:
+            guidelines = 0
+
+    return papers + guidelines
+
 def search_records(limit: int, q: str) -> List[Dict[str, str]]:
     raw = (q or "").strip()
     if not raw:

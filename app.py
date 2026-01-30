@@ -16,6 +16,8 @@ from db import (
     ensure_schema,
     ensure_guidelines_schema,
     db_count,
+    guidelines_count,
+    db_count_all,
     is_saved,
     save_record,
     search_records,
@@ -396,7 +398,10 @@ page = st.sidebar.radio(
 
 
 st.sidebar.caption(f"DB: `{_db_path()}`")
-st.sidebar.caption(f"Saved: **{db_count()}**")
+st.sidebar.caption(
+    f"Saved: **{db_count_all()}**  "
+    f"({db_count()} abstracts, {guidelines_count()} guidelines)"
+)
 
 
 def render_help_about_page() -> None:
