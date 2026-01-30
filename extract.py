@@ -560,6 +560,7 @@ _GUIDELINE_SECTION_CHOICES = [
     "Secondary prevention",
     "Patient education",
     "Special populations",
+    "Possible repeats",
 ]
 
 _GUIDELINE_SECTION_ORDER = {name: i for i, name in enumerate(_GUIDELINE_SECTION_CHOICES, start=1)}
@@ -681,6 +682,7 @@ def gpt_generate_guideline_recommendations_display(recs: List[Dict[str, str]], m
         "- section must be ONE short label. Prefer from this list and in this order:\n"
         f"{', '.join(_GUIDELINE_SECTION_CHOICES)}\n"
         "- If none fit, use a short custom label or 'Other'.\n"
+        "- A note about the 'Possible repeats' section: use this if a later recommendation appears to be a duplicate or near-duplicate, either semantically or literally, of an earlier recommendation in the guideline. This overrides categorizing it somewhere else.\n"
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 

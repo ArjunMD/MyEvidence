@@ -1168,7 +1168,7 @@ elif page == "Guidelines (PDF Upload)":
                         n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, pdf_bytes, progress_cb=_cb)
 
 
-                st.success(f"Done. Guideline ID: `{gid_saved}` • Stored recommendations: {n_recs if n_recs else '—'}")
+                st.success(f"Done. Guideline ID: `{gid_saved}` • Extracted recommendations: {n_recs if n_recs else '—'}")
                 st.rerun()
 
             except Exception as e:
@@ -1263,13 +1263,13 @@ elif page == "Guidelines (PDF Upload)":
 
     disp_current = (st.session_state.get("guideline_display_md") or "").strip()
     if not disp_current:
-        st.info("No generated display yet. Click **Generate** to create one from extracted recommendations.")
+        st.info("No generated display yet.")
 
     st.text_area(
         "Display (Markdown)",
         key="guideline_display_md",
         height=520,
-        placeholder="Click Generate to create a sectioned, clinician-friendly display. You can then edit freely and Save.",
+        placeholder="Saved clinician-friendly display (Markdown). You can edit freely and click Save.",
     )
 
     cA, cC = st.columns([1, 2], gap="large")
