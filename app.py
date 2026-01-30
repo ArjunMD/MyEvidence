@@ -1261,10 +1261,6 @@ elif page == "Guidelines (PDF Upload)":
         st.session_state["guideline_display_loaded_gid"] = gid
         st.session_state["guideline_display_md"] = get_guideline_recommendations_display(gid) or ""
 
-    disp_current = (st.session_state.get("guideline_display_md") or "").strip()
-    if not disp_current:
-        st.info("No generated display yet.")
-
     st.text_area(
         "Display (Markdown)",
         key="guideline_display_md",
