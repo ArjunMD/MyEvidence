@@ -170,6 +170,142 @@ def _year_sort_key(y: str) -> Tuple[int, str]:
         return (2, "0000")
     return (1, ys)
 
+# ---------------- Guideline display editing helpers ----------------
+
+_REC_LINE_RE = re.compile(r"^\s*-\s+\*\*Rec\s+(\d+)\.\*\*\s*(.*)$")
+_REC_RENUMBER_RE = re.compile(r"^(\s*-\s+\*\*Rec\s+)(\d+)(\.\*\*\s*)(.*)$")
+
+def _parse_rec_nums(raw: str) -> List[int]:
+    """
+    Accepts: "7", "7,12, 13", "Rec 7 and 12", etc.
+    Returns de-duped positive ints in first-seen order.
+    """
+    s = (raw or "").strip()
+    if not s:
+        return []
+    nums: List[int] = []
+    seen = set()
+    for tok in re.findall(r"\d+", s):
+        try:
+            n = int(tok)
+        except Exception:
+            continue
+        if n <= 0 or n in seen:
+            continue
+        seen.add(n)
+        nums.append(n)
+    return nums
+
+def _delete_recs_from_guideline_md(md: str, delete_nums: List[int]) -> Tuple[str, List[int]]:
+    """
+    Deletes ONLY rec bullet lines matching `- **Rec N.** ...` from the stored markdown.
+    Does NOT renumber remaining Rec lines (so gaps remain).
+    Also prunes empty `###` sections (when they contain nothing meaningful after deletes).
+
+    Returns: (new_md, removed_nums_in_order)
+    """
+    text = (md or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+
+    delete_set = set(int(n) for n in (delete_nums or []) if isinstance(n, int) and n > 0)
+    if not delete_set:
+        return (md or "").strip(), []
+
+    removed: List[int] = []
+    filtered: List[str] = []
+
+    # 1) Remove selected rec lines
+    for ln in lines:
+        m = _REC_LINE_RE.match(ln)
+        if m:
+            try:
+                old_n = int(m.group(1))
+            except Exception:
+                old_n = -1
+            if old_n in delete_set:
+                removed.append(old_n)
+                continue
+        filtered.append(ln)
+
+    if not removed:
+        return (md or "").strip(), []
+
+    # 2) Prune empty `###` sections
+    out: List[str] = []
+    i = 0
+    while i < len(filtered):
+        line = filtered[i]
+        if line.startswith("### "):
+            heading = line
+            i += 1
+            block: List[str] = []
+            while i < len(filtered) and not filtered[i].startswith("### "):
+                block.append(filtered[i])
+                i += 1
+
+            has_rec = any(_REC_LINE_RE.match(b or "") for b in block)
+            has_meaningful_nonrec = any(
+                (b or "").strip()
+                and not _REC_LINE_RE.match(b or "")
+                for b in block
+            )
+
+            # Keep section if it still has recs OR user-added meaningful content
+            if has_rec or has_meaningful_nonrec:
+                out.append(heading)
+                out.extend(block)
+            else:
+                # drop section entirely
+                if out and out[-1].strip():
+                    out.append("")
+        else:
+            out.append(line)
+            i += 1
+
+    new_md = "\n".join(out).strip()
+
+    # Optional: if nothing remains, make it explicit
+    still_has_any_rec = any(_REC_LINE_RE.match(ln or "") for ln in out)
+    if not still_has_any_rec:
+        if new_md:
+            new_md += "\n\n_No recommendations remaining._"
+        else:
+            new_md = "_No recommendations remaining._"
+
+    # de-dupe removed in order
+    seen = set()
+    removed_ordered: List[int] = []
+    for n in removed:
+        if n in seen:
+            continue
+        seen.add(n)
+        removed_ordered.append(n)
+
+    return new_md, removed_ordered
+
+
+def _guideline_md_with_delete_links(md: str, gid: str) -> str:
+    """
+    Render-only: inject a subtle 🗑️ link next to each Rec N label.
+    Clicking triggers ?gid=...&delrec=N (handled by query param router).
+    """
+    base = (md or "")
+    gid_q = quote_plus((gid or "").strip())
+
+    pat = re.compile(r"(?m)^(\s*-\s+\*\*Rec\s+(\d+)\.\*\*)(\s*)")
+    def repl(m: re.Match) -> str:
+        num = m.group(2)
+        icon = (
+            f"<a href='?gid={gid_q}&delrec={num}' target='_self' "
+            f"title='Delete Rec {num}' "
+            f"style='text-decoration:none; opacity:0.35; margin-left:0.25rem;'>🗑️</a>"
+        )
+        # keep original whitespace after the label
+        return f"{m.group(1)} {icon}{m.group(3)}"
+
+    return pat.sub(repl, base)
+
+
 # --------------- Meta synthesis helpers (papers + guidelines) ---------------
 
 def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
@@ -377,16 +513,31 @@ def _browse_search_link(*, pmid: str = "", gid: str = "") -> str:
 _qp = _get_query_params()
 _open_pmid = _clean_pmid(_qp_first(_qp, "pmid"))
 _open_gid = (_qp_first(_qp, "gid") or "").strip()
+_open_delrec = (_qp_first(_qp, "delrec") or "").strip()
 
 if _open_pmid or _open_gid:
     st.session_state["nav_page"] = "DB Search"
+
+    # If coming from a deep link, don't let an old typed search override forced selection.
+    st.session_state["db_search_any"] = ""
+
     if _open_pmid:
         st.session_state["db_search_open_pmid"] = _open_pmid
         st.session_state.pop("db_search_open_gid", None)
     if _open_gid:
         st.session_state["db_search_open_gid"] = _open_gid
         st.session_state.pop("db_search_open_pmid", None)
+
+    # Optional delete trigger (used by 🗑️ links in guideline display)
+    if _open_delrec:
+        st.session_state["db_search_delete_rec"] = _open_delrec
+
+        # Keep Edit mode ON after one-click deletes
+        if _open_gid:
+            st.session_state[f"dbs_guideline_edit_{_open_gid}"] = True
+
     _clear_query_params()
+
 
 
 page = st.sidebar.radio(
@@ -958,15 +1109,44 @@ elif page == "DB Search":
 
         st.divider()
 
-        # Clinician-friendly recommendations display (read-only)
+        # --- One-click delete support via ?gid=...&delrec=N ---
+        pending_del = (st.session_state.pop("db_search_delete_rec", "") or "").strip()
+        if pending_del:
+            nums = _parse_rec_nums(pending_del)
+            if nums:
+                cur = (get_guideline_recommendations_display(gid) or "").strip()
+                new_md, removed = _delete_recs_from_guideline_md(cur, nums)
+                if removed:
+                    update_guideline_recommendations_display(gid, new_md)
+                    st.session_state[f"dbs_guideline_edit_{gid}"] = True  # keep Edit on
+                    st.success(f"Deleted: {', '.join([f'Rec {n}' for n in removed])}")
+                else:
+                    st.info("No matching recommendation numbers found.")
+
+        # Reload after any possible update above
         disp = (get_guideline_recommendations_display(gid) or "").strip()
+
+        # Tiny edit toggle (keeps default view clean)
+        cL, cR = st.columns([6, 1], gap="small")
+        with cR:
+            edit_mode = st.toggle(
+                "Quick Delete",
+                value=False,
+                key=f"dbs_guideline_edit_{gid}",
+            )
+        with cL:
+            if edit_mode:
+                st.caption("Click 🗑️ to delete a recommendation permanently. Recommendations can also be edited in the Guidelines page.")
+
+        # Render
         if disp:
-            st.markdown(disp)
+            if edit_mode:
+                st.markdown(_guideline_md_with_delete_links(disp, gid), unsafe_allow_html=True)
+            else:
+                st.markdown(disp)
         else:
             st.info("No clinician-friendly recommendations display saved for this guideline yet.")
 
-
- 
 
 # =======================
 # Page: DB Browse
