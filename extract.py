@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import requests
 import streamlit as st
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import quote
 
 try:
@@ -676,12 +676,13 @@ def gpt_generate_guideline_recommendations_display(
     instructions = (
         "You are categorizing clinical guideline recommendations into clinician-friendly sections.\n"
         "Return ONLY valid JSON with this shape:\n"
-        "{\"items\":[{\"i\":1,\"section\":\"Diagnosis\"}, ...]}\n\n"
+        "{\"items\":[{\"i\":1,\"section\":\"Labs\"}, ...]}\n\n"
         "Rules:\n"
         "- Each input item must appear exactly once in output.\n"
         "- section must be ONE short label. Prefer from this list and in this order:\n"
         f"{', '.join(_GUIDELINE_SECTION_CHOICES)}\n"
-        "- If none fit, use a short custom label or 'Other'.\n"
+        "- If none fit, place in 'Other'.\n"
+        "- A note about the 'Disposition' section: This refers to just after initial evaluaion. I.e., whether the patient should be discharged from the emergency department, admitted to the a hospital floor, or admitted to the intensive care unit (or sometimes other options as well).\n"
         "- A note about the 'Possible repeats' section: use this if a later recommendation appears to be a duplicate or near-duplicate, either semantically or literally, of an earlier recommendation in the guideline. This overrides categorizing it somewhere else.\n"
         "- Do NOT include any extra keys. No markdown. No commentary."
     )

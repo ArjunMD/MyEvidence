@@ -1,138 +1,78 @@
 # MyEvidence
 
-A lightweight evidence manager for clinicians: pull PubMed abstracts by PMID, extract key PICO-style details, upload guideline PDFs, and keep a searchable, curated library.
+Build your own evidence shelf you'll actually use.
+
+**MyEvidence** is an application for clinicians who like PubMed… but don’t like losing the good papers in 37 open tabs; who like guidelines... but don't like scanning 80 pages for actionalble recommendations. Save studies + guidelines into a personal database, skim them in a clean format, and generate quick syntheses when you’re trying to make a call.
+
+This is meant to feel like a lightweight, practical tool — not a research platform.
 
 ---
 
-## About the app
+## What you can do
 
-**MyEvidence** is designed to be:
-- **Curated**: you intentionally add items to your database and keep what matters.
-- **Easy to navigate**: a small set of pages with one job each (capture → review → search → synthesize).
-- **Easy to read**: the database view emphasizes “what I need to know quickly” (population, intervention/comparison, outcomes/results, and the authors’ bottom line).
+### ✅ Save PubMed studies fast
+- Paste a **PMID**
+- Pull the abstract from PubMed
+- Auto-extract structured notes:
+  - patient count
+  - study design + setting tags
+  - patient details
+  - intervention/comparison
+  - results bullets
+  - authors’ conclusion
+- Save it into your local database
 
-MyEvidence currently supports two types of sources:
-1. **PubMed studies** (via PMID lookup)
-2. **Guideline PDFs** (via Azure Document Intelligence → recommendation extraction)
+### ✅ Turn guideline PDFs into something readable
+- Upload a guideline PDF (the PDF file itself isn’t stored — only extracted text + your curated display)
+- Auto-extract recommendations, categorized into sections (Labs, Imaging, Disposition, etc.)
+- Edit the final display however you want
 
----
+### ✅ Find stuff when you actually need it
+- Use **DB Search** and **DB Browse** to search across your saved papers/guidelines and skim by year or specialty
 
-## How to use the app
-
-### 1) PMID → Abstract (capture a study)
-**What it does:** Fetches a PubMed abstract from a PMID, then uses OpenAI to extract structured notes.
-
-**Main controls**
-- **PMID**: paste a PMID
-- **Fetch**: pulls PubMed data, then runs extraction on the abstract. Extractions are editable.
-- **Add to database**: saves the study to your local database.
-
-**Suggested workflow**
-1. Search a topic on PubMed. I recommend filtering by last 10 years, RCTs, systematic reviews, and/or meta-analyses to avoid dilution of levels of evidence.
-2. Enter a PMID in the app → **Fetch**  
-2. Quickly skim/edit the extracted fields (especially the conclusion + results bullets)  
-3. Click **Add to database**  
-4. (Optional) open **Related articles (top 5)** to capture nearby evidence and repeat
-
----
-### 2) Guidelines (PDF Upload) (capture a guideline + extract recommendations)
-**What it does:** Saves a guideline PDF, extracts layout text via Azure Document Intelligence, extracts guideline recommendations using OpenAI, and lets you curate them.
-
-**Main controls**
-- **Upload a guideline PDF** → choose a PDF from your computer
-- **Save PDF**: stores the PDF in your local database, unless it already exists
-- **Extract metadata**: These are again editable
-- **Extract recommendations now**: Editable
-
-**Reviewing extracted recommendations**
-- Recommendations initially show up as **Unreviewed**
-- For each recommendation:
-  - **Keep**: marks it as *Relevant* (and saves any edits you made in the text box)
-  - **Remove**: marks it as *Irrelevant*
-  - **Delete**: permanently removes that recommendation entry
-
-**Suggested workflow**
-1. Keep recommendations that are crucial and that you would want to see when browsing a topic. "Irrelevant" are not removed. They are reviewable in different section.  
-2. At this time, editing recommendations or choosing how to categorize them can only be done once, and are permanent once done (unless the whole guideline is deleted from the datagase)
+### ✅ Answer focused questions
+- Select the studies and guidelines you want to use as evidence and ask focused questions, for example:
+  - What are the contradictions among these guidelines?
+  - What is the overall side-effect profile of [insert medication]?
+  - What is the effect size of [insert intervention]?
 
 ---
 
-### 3) DB Search (find a saved study or guideline)
-**For papers**
-- Shows a normalized formatting of PICO details:
-- The original abstract and related articles are viewable in an expander
+## What’s going on with each button click (and what you can edit)
 
-**For guidelines**
-- Lets you choose what to display: Relevant, Unreviewed, Irrelevant, or All.
-- Unreviewed items again have **Keep / Remove / Delete** controls.
+### 1) PMID → Abstract
+- **Fetch** pulls the PubMed abstract by PMID, plus:
+  - top 5 PubMed “Related articles”
+  - top 5 Semantic Scholar recommendations
+- It also extracts a structured summary (editable) and suggests a specialty label.
+- **Before saving:** everything is editable.
+- **After saving:** it’s read-only (but easy to delete and re-add if you want to revise).
 
----
+### 2) Guidelines — Upload PDF
+- **Upload + Extract**:
+  1) uses Azure Document Intelligence to convert the PDF into text/markdown (used for extraction)
+  2) extracts metadata (name/year/specialty)
+  3) extracts actionable recommendations and organizes them into clinician-friendly sections
+- Only the final recommendations display is saved as **Markdown** and is fully editable.
+- You can also quick-delete individual recommendations from the guideline view in **DB Search**.
+- For large guideline file sizes, make sure computer doesn't go to sleep as you extract.
 
-### 4) DB Browse (skim your library)
-**What it does:** A quick “library shelf” view grouped by **Year or Specialty**.
-Use it when you want to browse rather than search. 
 
----
-
-### 5) Generate meta (qualitative synthesis)
-**What it does:** Pick multiple saved studies and/or guidelines and generate a single paragraph synthesis (or answer a focused question).
-
----
-
-### 6) Delete (clean up)
-**What it does:** Permanently deletes saved papers or guidelines (and any extracted content).
+### 3) Generate meta (qualitative synthesis)
+- Pick any mix of saved papers + guidelines and generate a single-paragraph answer to a **focused clinical question**.
 
 ---
 
-## Online version: preview / proof of concept
+## Online version = preview (expect occasional weirdness)
 
-The online deployment is intended as a **preview** and may occasionally error. Reasons include (but aren’t limited to):
-- **Multi-user behavior** (shared compute, file system quirks, DB locking/limits)
-- **Streamlit updates**
-- **App code updates / pushes**
-- **Azure Document Intelligence changes**
-- **OpenAI API changes**, model availability, rate limits, etc.
+The online deployment is meant to let you try the workflow and vibe — but it’s not the “serious” version.
 
-I am actively working on quality of life improvements, for example:
-- Editing guideline recommendations *after* you’ve marked them “Relevant” (today, edits are easiest during the unreviewed review step)
-- Smarter specialty normalization/merging (e.g., “Critical care” vs “Intensive care” → one combined specialty)
+Things that can happen online:
+- random errors/timeouts (shared compute + transient limits)
+- database behavior can be quirky (multi-user filesystem, locking, or resets depending on hosting)
+- extraction can fail intermittently (rate limits, model availability, upstream API changes)
 
----
+The online demo may reset occasionally as I push updates. If you want a reliable personal library, running locally is the way to go.
 
-## Run MyEvidence locally (intended for those without coding/Git experience)
-### Step 1 — Install prerequisites
-1. Install **Python** (recommended: Python 3.10+)
-
-### Step 2 — Download the project
-- Repository Link: https://github.com/ArjunMD/MyEvidence 
-- Download a ZIP and unzip it.
-- Open a terminal and `cd` into the project folder. (You can google this)
-
-### Step 3 — Create a virtual environment (recommended)
-**macOS / Linux**
-- In the terminal, in the project folder, type the following, then press enter: python3 -m venv .venv
-- Then type the following, and press enter: source .venv/bin/activate
-
-**Windows (PowerShell)**
-- Similarly, but in powershell: py -m venv .venv
-- Then .\.venv\Scripts\Activate.ps1
-
-### Step 4 — Install dependencies
-- Type then press enter: python -m pip install --upgrade pip
-- Again: pip install -r requirements.txt
-
-### Step 5 — Add your API keys (OpenAI + Azure Document Intelligence)
-- Create a file within your project folder: `.streamlit/secrets.toml`
-- The format is 3 lines:
-
-OPENAI_API_KEY = ""
-AZURE_DI_ENDPOINT = ""
-AZURE_DI_KEY = ""
-
-- You will then have to obtain an openAI key using OpenAI platform 
-- You will have to obtain an Azure Document INtelligence Endpoint and Key as well
-- You can find instructions on how to do these on google/youtube
-
-### Step 6 - Run the app
-- When ready, open a terminal, cd to the project folder, activate the virtual environment (line 2 of step 3), and then type and press enter: streamlit run app.py
-- To exit the app, after closing the browser, go to the terminal and press Ctrl+C
+If you have suggestions, please reach out — I’m actively improving this.
+(Repo: https://github.com/ArjunMD/MyEvidence/)
