@@ -1335,14 +1335,35 @@ elif page == "Guidelines (PDF Upload)":
                 if disp_now:
                     st.info("This guideline already has a saved recommendations display; skipping extraction.")
                 else:
-                    status = st.empty()
+                    # --- richer, phase-aware progress UI (replaces vague "Processing") ---
+                    phase_ph = st.empty()
+                    detail_ph = st.empty()
+                    prog_ph = st.empty()
 
-                    def _cb(done, total, msg="Processing…"):
-                        # total is intentionally ignored; we only show a phase + counts when available
+                    def _cb(done, total, msg="Working…", detail=""):
+                        m = (msg or "").strip()
+                        d = (detail or "").strip()
+
+                        if m:
+                            phase_ph.caption(m)
+
                         if total and total > 0:
-                            status.write(f"{msg} ({done}/{total})")
+                            try:
+                                frac = float(done) / float(total)
+                            except Exception:
+                                frac = 0.0
+                            pct = int(max(0, min(100, round(frac * 100))))
+                            prog_ph.progress(pct)
+
+                            if d:
+                                detail_ph.caption(f"{d} ({done}/{total})")
+                            else:
+                                detail_ph.caption(f"{done}/{total}")
                         else:
-                            status.write(msg)
+                            # hide bar when we don't have a meaningful denominator
+                            prog_ph.empty()
+                            detail_ph.caption(d if d else "")
+
 
                     with st.spinner("Extracting recommendations + generating final display…"):
                         n_recs = extract_and_store_guideline_recommendations_azure(gid_saved, pdf_bytes, progress_cb=_cb)

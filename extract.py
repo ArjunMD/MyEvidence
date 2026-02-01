@@ -633,7 +633,11 @@ def _parse_json_from_model(raw: str) -> Dict:
             return {}
 
 
-def gpt_generate_guideline_recommendations_display(recs: List[Dict[str, str]], meta: Optional[Dict[str, str]] = None) -> str:
+def gpt_generate_guideline_recommendations_display(
+    recs: List[Dict[str, str]],
+    meta: Optional[Dict[str, str]] = None,
+    progress_cb=None,
+) -> str:
     """
     Produces markdown with clinician-friendly sections, containing EVERY recommendation.
     OpenAI is used ONLY to classify each recommendation into a section.
@@ -682,8 +686,35 @@ def gpt_generate_guideline_recommendations_display(recs: List[Dict[str, str]], m
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 
+    def _progress(done=0, total=0, msg="", detail=""):
+        if not progress_cb:
+            return
+        try:
+            progress_cb(done, total, msg=msg, detail=detail)
+        except TypeError:
+            try:
+                progress_cb(done, total, msg or detail or "")
+            except TypeError:
+                progress_cb(done, total)
+
     chunks = _chunk_recs_for_classification(items, max_chars=14000, max_items=45)
-    for ch in chunks:
+    total_chunks = len(chunks)
+
+    _progress(
+        0,
+        max(1, total_chunks),
+        msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
+        detail=f"{len(items)} recommendation(s) in {total_chunks} batch(es)",
+    )
+
+    for ci, ch in enumerate(chunks, start=1):
+        _progress(
+            ci - 1,
+            max(1, total_chunks),
+            msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
+            detail=f"Running batch {ci}/{total_chunks}",
+        )
+
         payload = {
             "model": _openai_model(),
             "instructions": instructions,
@@ -715,6 +746,20 @@ def gpt_generate_guideline_recommendations_display(recs: List[Dict[str, str]], m
                 continue
             sec = _safe_section_label(oi.get("section") or "")
             i_to_section[ii] = sec
+
+        _progress(
+            ci,
+            max(1, total_chunks),
+            msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
+            detail=f"Finished batch {ci}/{total_chunks}",
+        )
+
+    _progress(
+        max(1, total_chunks),
+        max(1, total_chunks),
+        msg="Step 4/4 — Rendering clinician-friendly display…",
+        detail="Formatting final Markdown output",
+    )
 
     # Render ALL recommendations deterministically (full text + strength/evidence/source)
     # Note: recs list already matches the i-order we used above (minus empty-text drops)
@@ -1475,16 +1520,46 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
     gid = (guideline_id or "").strip()
     if not gid:
         return 0
+    
+    def _progress(done=0, total=0, msg="", detail=""):
+        if not progress_cb:
+            return
+        try:
+            progress_cb(done, total, msg=msg, detail=detail)
+        except TypeError:
+            try:
+                progress_cb(done, total, msg or detail or "")
+            except TypeError:
+                progress_cb(done, total)
 
+
+    _progress(
+        0, 0,
+        msg="Step 1/4 — Converting PDF to text…",
+        detail="Azure Document Intelligence → Markdown",
+    )
     md = markdown_from_pdf_bytes(pdf_bytes)
     if not md:
+        _progress(0, 0, msg="No extractable text found.", detail="PDF → Markdown returned empty content")
         return 0
 
+    _progress(
+        0, 0,
+        msg="Step 2/4 — Splitting document into sections…",
+        detail="Parsing headings and building a section map",
+    )
     sections = _split_markdown_into_sections(md)
     if not sections:
+        _progress(0, 0, msg="No sections found.", detail="Could not split document into headings/sections")
         return 0
     if len(sections) > 3000:
         sections = sections[:3000]
+
+    _progress(
+        0, len(sections),
+        msg="Step 2/4 — Triaging sections for recommendations…",
+        detail="Scanning section previews for directive/recommendation language",
+    )
 
     keep_sec_idxs: List[int] = []
     for b0 in range(0, len(sections), SECTION_TRIAGE_BATCH):
@@ -1494,29 +1569,55 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
         except Exception:
             keep = []
         keep_sec_idxs.extend(keep)
-        if progress_cb:
-            progress_cb(min(b0 + len(batch), len(sections)), len(sections))
+
+        _progress(
+            min(b0 + len(batch), len(sections)),
+            len(sections),
+            msg="Step 2/4 — Triaging sections for recommendations…",
+            detail="Scanning section previews for directive/recommendation language",
+        )
 
     keep_set = set(int(x) for x in keep_sec_idxs if isinstance(x, int) or str(x).isdigit())
     if not keep_set:
+        _progress(
+            len(sections), len(sections),
+            msg="No recommendation sections detected.",
+            detail="Triage step did not flag any candidate sections",
+        )
         return 0
 
-    # Build rec list in memory (no DB rec table)
-    recs: List[Dict[str, str]] = []
-    seen = set()
-
+    keep_sections: List[Dict[str, str]] = []
     for s in sections:
         try:
             sec_idx = int(s.get("sec_idx") or 0)
         except Exception:
             continue
-        if sec_idx not in keep_set:
-            continue
+        if sec_idx in keep_set:
+            keep_sections.append(s)
 
+    _progress(
+        0, len(keep_sections),
+        msg="Step 3/4 — Extracting recommendations…",
+        detail=f"Analyzing {len(keep_sections)} candidate section(s)",
+    )
+
+    # Build rec list in memory (no DB rec table)
+    recs: List[Dict[str, str]] = []
+    seen = set()
+
+    total_keep = len(keep_sections)
+    for si, s in enumerate(keep_sections, start=1):
         path = (s.get("path") or "").strip() or "(no heading)"
         content = (s.get("content") or "").strip()
         if not content:
+            _progress(si, total_keep, msg="Step 3/4 — Extracting recommendations…", detail=f"Skipped empty section {si}/{total_keep}")
             continue
+
+        _progress(
+            si - 1, total_keep,
+            msg="Step 3/4 — Extracting recommendations…",
+            detail=f"Section {si}/{total_keep}: {path[:90]}",
+        )
 
         parts = _split_large_section(content, max_chars=SECTION_MAX_CHARS_SEND, overlap=SECTION_PART_OVERLAP_CHARS)
         for pi, part in enumerate(parts, start=1):
@@ -1549,14 +1650,30 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
                     }
                 )
 
+        _progress(
+            si, total_keep,
+            msg="Step 3/4 — Extracting recommendations…",
+            detail=f"Finished section {si}/{total_keep} • {len(recs)} unique recommendation(s) found so far",
+        )
+
     if not recs:
+        _progress(total_keep, total_keep, msg="No recommendations extracted.", detail="Candidate sections produced no extractable recommendations")
         return 0
 
     meta_now = get_guideline_meta(gid) or {}
-    disp_md = gpt_generate_guideline_recommendations_display(recs, meta_now)
+    _progress(
+        0, 0,
+        msg="Step 4/4 — Generating clinician-friendly display…",
+        detail=f"Organizing {len(recs)} recommendation(s) into sections",
+    )
+    disp_md = gpt_generate_guideline_recommendations_display(recs, meta_now, progress_cb=_progress)
+
+    _progress(0, 0, msg="Step 4/4 — Saving display…", detail="Writing final Markdown to database")
     update_guideline_recommendations_display(gid, disp_md)
 
+    _progress(0, 0, msg="Done.", detail=f"Saved {len(recs)} recommendation(s)")
     return len(recs)
+
 
 
 # ---------------- Guideline metadata extraction ----------------
