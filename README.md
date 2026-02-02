@@ -21,6 +21,7 @@ This is meant to feel like a lightweight, practical tool — not a research plat
   - results bullets
   - authors’ conclusion
 - Save it into your local database
+- I recommend keeping additions to RCTs, meta-analyses, and systematic reviews to avoid diluting level of evidence
 
 ### ✅ Turn guideline PDFs into something readable
 - Upload a guideline PDF (the PDF file itself isn’t stored — only extracted text + your curated display)
