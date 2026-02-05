@@ -173,7 +173,6 @@ def _year_sort_key(y: str) -> Tuple[int, str]:
 # ---------------- Guideline display editing helpers ----------------
 
 _REC_LINE_RE = re.compile(r"^\s*-\s+\*\*Rec\s+(\d+)\.\*\*\s*(.*)$")
-_REC_RENUMBER_RE = re.compile(r"^(\s*-\s+\*\*Rec\s+)(\d+)(\.\*\*\s*)(.*)$")
 
 def _parse_rec_nums(raw: str) -> List[int]:
     """
