@@ -376,7 +376,6 @@ def gpt_generate_meta_combined(
     mode: str,
     prompt_text: str,
     include_abstract: bool,
-    tone: str,
 ) -> str:
     """
     Generate a qualitative synthesis paragraph from a mixture of saved studies (PMIDs)
@@ -2078,7 +2077,6 @@ elif page == "Generate meta":
                             mode="answer",
                             prompt_text=prompt_text,
                             include_abstract=include_abstract,
-                            tone="Clear and organized",
                         )
                         st.session_state["meta_last_output"] = out
                     except Exception as e:
@@ -2115,7 +2113,6 @@ elif page == "Delete":
             st.info("No saved papers found.")
         else:
             def _paper_label(r: Dict[str, str]) -> str:
-                pmid = (r.get("pmid") or "").strip()
                 title = (r.get("title") or "").strip()
                 year = (r.get("year") or "").strip()
                 journal = (r.get("journal") or "").strip()
@@ -2182,7 +2179,6 @@ elif page == "Delete":
 
         # Helper for guideline label.
         def _guideline_label(r: Dict[str, str]) -> str:
-            gid = (r.get("guideline_id") or "").strip()
             title = (r.get("title") or "").strip()
             year = (r.get("year") or "").strip()
             spec = (r.get("specialty") or "").strip()

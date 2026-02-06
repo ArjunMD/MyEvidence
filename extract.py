@@ -490,19 +490,6 @@ def search_pubmed_by_date_filters(
     return [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
 
 
-def search_nejm_rcts_by_date(start_date: str, end_date: str, retmax: int = 200) -> List[Dict[str, str]]:
-    """
-    Backward-compatible wrapper for legacy callers.
-    """
-    return search_pubmed_by_date_filters(
-        start_date=start_date,
-        end_date=end_date,
-        journal_term='"N Engl J Med"[jour]',
-        publication_type_terms=['"Randomized Controlled Trial"[Publication Type]'],
-        retmax=retmax,
-    )
-
-
 # ---------------- OpenAI helpers ----------------
 
 def _openai_api_key() -> str:
@@ -739,8 +726,6 @@ def gpt_generate_guideline_recommendations_display(
 
     meta = meta or {}
     gname = (meta.get("guideline_name") or meta.get("filename") or "Guideline").strip()
-    gy = (meta.get("pub_year") or "").strip()
-    gspec = (meta.get("specialty") or "").strip()
 
     # Build items in stable display order
     items: List[Dict] = []
@@ -881,16 +866,6 @@ def gpt_generate_guideline_recommendations_display(
         return (_GUIDELINE_SECTION_ORDER.get(s, 10_000), s.lower())
 
     sections_sorted = sorted(grouped.keys(), key=_sec_sort_key)
-
-    # Header
-    hdr_bits = []
-    if gy:
-        hdr_bits.append(gy)
-    if gspec:
-        hdr_bits.append(gspec)
-    hdr = f"# {gname}\n"
-    if hdr_bits:
-        hdr += f"\n_{' • '.join(hdr_bits)}_\n"
 
     md_lines: List[str] = ["", "## Recommendations", ""]
 
