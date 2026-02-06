@@ -48,6 +48,11 @@ def ensure_schema() -> None:
             );
             """
         )
+        # Migration: add uploaded_at for History page (existing rows get NULL)
+        try:
+            conn.execute("ALTER TABLE abstracts ADD COLUMN uploaded_at TEXT;")
+        except sqlite3.OperationalError:
+            pass
 
 
 def save_record(
@@ -64,15 +69,16 @@ def save_record(
     results: Optional[str],
     specialty: Optional[str],
 ) -> None:
+    uploaded_at = _utc_iso_z()
     with _connect_db() as conn:
         conn.execute(
             """
             INSERT INTO abstracts (
                 pmid, title, abstract, year, journal, patient_n, study_design,
                 patient_details, intervention_comparison, authors_conclusions, results,
-                specialty
+                specialty, uploaded_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 pmid,
@@ -87,6 +93,7 @@ def save_record(
                 authors_conclusions,
                 results,
                 specialty,
+                uploaded_at,
             ),
         )
 
@@ -282,6 +289,44 @@ def list_recent_records(limit: int) -> List[Dict[str, str]]:
                 "patient_n": "" if r["patient_n"] is None else str(int(r["patient_n"])),
                 "study_design": (r["study_design"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
+            }
+        )
+    return out
+
+
+def list_abstracts_for_history(limit: int) -> List[Dict[str, str]]:
+    """Return abstracts with uploaded_at, newest first (NULL uploaded_at last)."""
+    with _connect_db() as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT pmid, title, year, uploaded_at
+                FROM abstracts
+                ORDER BY uploaded_at DESC, pmid DESC
+                LIMIT ?;
+                """,
+                (int(limit),),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # uploaded_at column might not exist on very old DBs
+            rows = conn.execute(
+                """
+                SELECT pmid, title, year, NULL AS uploaded_at
+                FROM abstracts
+                ORDER BY pmid DESC
+                LIMIT ?;
+                """,
+                (int(limit),),
+            ).fetchall()
+
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        out.append(
+            {
+                "pmid": (r["pmid"] or "").strip(),
+                "title": (r["title"] or "").strip(),
+                "year": (r["year"] or "").strip(),
+                "uploaded_at": (r["uploaded_at"] or "").strip() if r["uploaded_at"] else "",
             }
         )
     return out
