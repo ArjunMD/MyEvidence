@@ -2,7 +2,7 @@
 
 import re
 import html
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Tuple, Optional
 
 import pandas as pd
@@ -36,6 +36,9 @@ from db import (
     list_abstracts_for_history,
     get_guideline_recommendations_display,
     update_guideline_recommendations_display,
+    get_saved_pmids,
+    hide_pubmed_pmid,
+    get_hidden_pubmed_pmids,
 )
 from extract import (
     fetch_pubmed_xml,
@@ -45,6 +48,7 @@ from extract import (
     parse_title,
     get_top_neighbors,
     get_s2_similar_papers,
+    search_pubmed_by_date_filters,
     gpt_extract_patient_n,
     gpt_extract_study_design,
     gpt_extract_patient_details,
@@ -162,6 +166,36 @@ def _render_plain_text(text: str, empty_hint: str = "—") -> None:
 
     safe = html.escape(s).replace("\n", "<br>")
     st.markdown(f"<div style='white-space: pre-wrap;'>{safe}</div>", unsafe_allow_html=True)
+
+
+def _filter_search_pubmed_rows(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    valid_rows: List[Dict[str, str]] = []
+    pmids: List[str] = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        pmid = (r.get("pmid") or "").strip()
+        if not pmid:
+            continue
+        valid_rows.append(r)
+        pmids.append(pmid)
+
+    if not valid_rows:
+        return []
+
+    saved_pmids = get_saved_pmids(pmids)
+    hidden_pmids = get_hidden_pubmed_pmids(pmids)
+    blocked = saved_pmids.union(hidden_pmids)
+    if not blocked:
+        return valid_rows
+
+    out: List[Dict[str, str]] = []
+    for r in valid_rows:
+        pmid = (r.get("pmid") or "").strip()
+        if pmid in blocked:
+            continue
+        out.append(r)
+    return out
 
 
 def _year_sort_key(y: str) -> Tuple[int, str]:
@@ -543,7 +577,7 @@ if _open_pmid or _open_gid:
 
 page = st.sidebar.radio(
     "Navigate",
-    ["PMID → Abstract", "Guidelines (PDF Upload)", "DB Search", "DB Browse", "Generate meta", "Delete", "About", "History"],
+    ["PMID → Abstract", "Guidelines (PDF Upload)", "DB Search", "DB Browse", "Generate meta", "Delete", "About", "History", "Search PubMed"],
     index=0,
     key="nav_page",
 )
@@ -593,6 +627,113 @@ def render_history_page() -> None:
         return
     lines = [f"- **{r[1]}** · {r[2]} · {r[3]}" for r in rows]
     st.markdown("\n".join(lines))
+
+
+def render_search_pubmed_page() -> None:
+    st.title("🔎 Search PubMed")
+    st.caption("Search PubMed by publication date, journal, and study type.")
+
+    today = datetime.now(timezone.utc).date()
+    default_start = today - timedelta(days=365)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        start_date = st.date_input("Start date", value=default_start, key="search_pubmed_start")
+    with c2:
+        end_date = st.date_input("End date", value=today, key="search_pubmed_end")
+
+    journal_query_by_label = {
+        "N Engl J Med": '"N Engl J Med"[jour]',
+        "JAMA": '"JAMA"[jour]',
+        "The Lancet": '"Lancet"[jour]',
+    }
+    study_type_queries = {
+        "Clinical Trial": ['"Clinical Trial"[Publication Type]'],
+        "Meta analysis": ['"Meta-Analysis"[Publication Type]'],
+        "Both": [
+            '"Clinical Trial"[Publication Type]',
+            '"Meta-Analysis"[Publication Type]',
+        ],
+    }
+
+    c3, c4 = st.columns(2)
+    with c3:
+        journal_label = st.selectbox(
+            "Select Journal",
+            options=list(journal_query_by_label.keys()),
+            index=0,
+            key="search_pubmed_journal",
+        )
+    with c4:
+        study_type_label = st.selectbox(
+            "Study type filter",
+            options=list(study_type_queries.keys()),
+            index=0,
+            key="search_pubmed_study_type",
+        )
+
+    if st.button("Search", type="primary", width="stretch", key="search_pubmed_btn"):
+        if start_date > end_date:
+            st.error("Start date must be on or before end date.")
+        else:
+            start_s = start_date.strftime("%Y/%m/%d")
+            end_s = end_date.strftime("%Y/%m/%d")
+            try:
+                with st.spinner("Searching PubMed…"):
+                    rows = search_pubmed_by_date_filters(
+                        start_s,
+                        end_s,
+                        journal_term=journal_query_by_label.get(journal_label, ""),
+                        publication_type_terms=study_type_queries.get(study_type_label, []),
+                    )
+                st.session_state["search_pubmed_rows"] = rows
+                st.session_state["search_pubmed_range"] = {"start": start_s, "end": end_s}
+                st.session_state["search_pubmed_filters"] = {
+                    "journal": journal_label,
+                    "study_type": study_type_label,
+                }
+            except requests.HTTPError as e:
+                st.error(f"PubMed search failed: {e}")
+            except Exception as e:
+                st.error(f"Unexpected search error: {e}")
+
+    if "search_pubmed_rows" not in st.session_state:
+        st.info("Choose a date range and click Search.")
+        return
+
+    rows = st.session_state.get("search_pubmed_rows") or []
+    rows = _filter_search_pubmed_rows(rows)
+    rng = st.session_state.get("search_pubmed_range") or {}
+    start_s = (rng.get("start") or "").strip()
+    end_s = (rng.get("end") or "").strip()
+    filters = st.session_state.get("search_pubmed_filters") or {}
+    journal_label = (filters.get("journal") or "").strip()
+    study_type_label = (filters.get("study_type") or "").strip()
+    if start_s and end_s:
+        st.caption(f"Range: {start_s} to {end_s}")
+    if journal_label or study_type_label:
+        st.caption(f"Filters: {journal_label or '—'} • {study_type_label or '—'}")
+    st.caption("Saved articles and items marked `Don't show again` are automatically excluded.")
+
+    if not rows:
+        st.info("No matching articles found for this date range and filter selection.")
+        return
+
+    st.success(f"Found {len(rows)} result(s).")
+    for r in rows:
+        title = (r.get("title") or "").strip() or "(no title)"
+        pmid = (r.get("pmid") or "").strip() or "—"
+        c_left, c_right = st.columns([5, 2])
+        with c_left:
+            st.markdown(f"- {title} — `{pmid}`")
+        with c_right:
+            if pmid != "—" and st.button(
+                "Don't show again",
+                key=f"search_pubmed_hide_{pmid}",
+                width="stretch",
+            ):
+                hide_pubmed_pmid(pmid)
+                st.rerun()
 
 
 def render_help_about_page() -> None:
@@ -1908,3 +2049,5 @@ elif page == "About":
 # =======================
 elif page == "History":
     render_history_page()
+elif page == "Search PubMed":
+    render_search_pubmed_page()

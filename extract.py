@@ -40,6 +40,7 @@ NCBI_API_KEY = ""
 NCBI_EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 NCBI_ELINK_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
 NCBI_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+NCBI_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 
 GUIDELINE_OPENAI_STRICTNESS = "medium"  # "strict" | "medium" | "loose"
@@ -411,6 +412,95 @@ def get_top_neighbors(pmid: str, top_n: int = 5) -> List[Dict[str, str]]:
     esum_xml = fetch_pubmed_esummary_xml(",".join(pmids))
     titles = parse_esummary_titles(esum_xml)
     return [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
+    q = (term or "").strip()
+    if not q:
+        return []
+
+    md = (mindate or "").strip()
+    xd = (maxdate or "").strip()
+    if not md or not xd:
+        return []
+
+    sess = _requests_session()
+    params = {
+        "db": "pubmed",
+        "term": q,
+        "retmode": "json",
+        "retmax": str(max(1, int(retmax))),
+        "sort": "pub date",
+        "datetype": "pdat",
+        "mindate": md,
+        "maxdate": xd,
+        **_ncbi_params_base(),
+    }
+    r = sess.get(NCBI_ESEARCH_URL, params=params, timeout=25)
+    r.raise_for_status()
+
+    payload = r.json() or {}
+    idlist = ((payload.get("esearchresult") or {}).get("idlist") or [])
+
+    out: List[str] = []
+    seen = set()
+    for pid in idlist:
+        p = str(pid or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+    return out
+
+
+def search_pubmed_by_date_filters(
+    start_date: str,
+    end_date: str,
+    journal_term: str,
+    publication_type_terms: List[str],
+    retmax: int = 200,
+) -> List[Dict[str, str]]:
+    """
+    Return PubMed results in a publication-date range using journal + publication-type terms.
+    Date format expected: YYYY/MM/DD.
+    """
+    journal_q = (journal_term or "").strip()
+    pub_type_terms = [(t or "").strip() for t in (publication_type_terms or []) if (t or "").strip()]
+
+    term_bits: List[str] = []
+    if journal_q:
+        term_bits.append(journal_q)
+    if pub_type_terms:
+        if len(pub_type_terms) == 1:
+            term_bits.append(pub_type_terms[0])
+        else:
+            term_bits.append("(" + " OR ".join(pub_type_terms) + ")")
+
+    if not term_bits:
+        return []
+
+    term = " AND ".join(term_bits)
+    pmids = search_pubmed_pmids(term=term, mindate=start_date, maxdate=end_date, retmax=retmax)
+    if not pmids:
+        return []
+
+    esum_xml = fetch_pubmed_esummary_xml(",".join(pmids))
+    titles = parse_esummary_titles(esum_xml)
+    return [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
+
+
+def search_nejm_rcts_by_date(start_date: str, end_date: str, retmax: int = 200) -> List[Dict[str, str]]:
+    """
+    Backward-compatible wrapper for legacy callers.
+    """
+    return search_pubmed_by_date_filters(
+        start_date=start_date,
+        end_date=end_date,
+        journal_term='"N Engl J Med"[jour]',
+        publication_type_terms=['"Randomized Controlled Trial"[Publication Type]'],
+        retmax=retmax,
+    )
 
 
 # ---------------- OpenAI helpers ----------------

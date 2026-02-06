@@ -6,7 +6,7 @@ import sqlite3
 import hashlib
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 DB_PATH = "data/papers.db"
 
@@ -53,6 +53,15 @@ def ensure_schema() -> None:
             conn.execute("ALTER TABLE abstracts ADD COLUMN uploaded_at TEXT;")
         except sqlite3.OperationalError:
             pass
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hidden_pubmed_pmids (
+                pmid TEXT PRIMARY KEY,
+                hidden_at TEXT NOT NULL
+            );
+            """
+        )
 
 
 def save_record(
@@ -102,6 +111,63 @@ def is_saved(pmid: str) -> bool:
     with _connect_db() as conn:
         row = conn.execute("SELECT 1 FROM abstracts WHERE pmid=? LIMIT 1;", (pmid,)).fetchone()
         return row is not None
+
+
+def get_saved_pmids(pmids: List[str]) -> Set[str]:
+    vals: List[str] = []
+    seen = set()
+    for raw in (pmids or []):
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        vals.append(p)
+    if not vals:
+        return set()
+
+    placeholders = ",".join(["?"] * len(vals))
+    with _connect_db() as conn:
+        rows = conn.execute(
+            f"SELECT pmid FROM abstracts WHERE pmid IN ({placeholders});",
+            tuple(vals),
+        ).fetchall()
+    return {(r["pmid"] or "").strip() for r in rows if (r["pmid"] or "").strip()}
+
+
+def hide_pubmed_pmid(pmid: str) -> None:
+    p = (pmid or "").strip()
+    if not p:
+        return
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO hidden_pubmed_pmids (pmid, hidden_at)
+            VALUES (?, ?)
+            ON CONFLICT(pmid) DO NOTHING;
+            """,
+            (p, _utc_iso_z()),
+        )
+
+
+def get_hidden_pubmed_pmids(pmids: List[str]) -> Set[str]:
+    vals: List[str] = []
+    seen = set()
+    for raw in (pmids or []):
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        vals.append(p)
+    if not vals:
+        return set()
+
+    placeholders = ",".join(["?"] * len(vals))
+    with _connect_db() as conn:
+        rows = conn.execute(
+            f"SELECT pmid FROM hidden_pubmed_pmids WHERE pmid IN ({placeholders});",
+            tuple(vals),
+        ).fetchall()
+    return {(r["pmid"] or "").strip() for r in rows if (r["pmid"] or "").strip()}
 
 
 def db_count() -> int:
