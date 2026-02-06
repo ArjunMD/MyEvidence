@@ -643,9 +643,9 @@ def render_search_pubmed_page() -> None:
         end_date = st.date_input("End date", value=today, key="search_pubmed_end")
 
     journal_query_by_label = {
-        "N Engl J Med": '"N Engl J Med"[jour]',
+        "NEJM": '"N Engl J Med"[jour]',
         "JAMA": '"JAMA"[jour]',
-        "The Lancet": '"Lancet"[jour]',
+        "Lancet": '"Lancet"[jour]',
     }
     study_type_queries = {
         "Clinical Trial": ['"Clinical Trial"[Publication Type]'],

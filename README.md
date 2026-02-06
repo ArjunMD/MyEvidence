@@ -70,7 +70,7 @@ This is meant to feel like a lightweight, practical tool — not a research plat
 
 ### 4) Search PubMed
 - Search by date range plus journal/study-type filters.
-- Current journal options: **N Engl J Med**, **JAMA**, **The Lancet**.
+- Current journal options: **NEJM**, **JAMA**, **The Lancet**.
 - Current study-type options: **Clinical Trial**, **Meta analysis**, or **Both**.
 - Each result has a **Don't show again** button.
 - Results are always filtered to remove:
@@ -82,13 +82,13 @@ This is meant to feel like a lightweight, practical tool — not a research plat
 ## Online version = preview (expect occasional weirdness)
 
 The online deployment is meant to let you try the workflow and vibe — but it’s not the “serious” version.
+Saving, deleting, editing, etc will not be permanent. At this time, only server-side permanent changes are possible. 
 
-Things that can happen online:
+Bugs that can happen online:
 - random errors/timeouts (shared compute + transient limits)
 - database behavior can be quirky (multi-user filesystem, locking, or resets depending on hosting)
 - extraction can fail intermittently (rate limits, model availability, upstream API changes)
 
-The online demo may reset occasionally as I push updates. If you want a reliable personal library, running locally is the way to go.
+The online demo may reset occasionally as I push updates. 
 
-If you have suggestions, please reach out — I’m actively improving this.
-(Repo: https://github.com/ArjunMD/MyEvidence/)
+If you want a reliable personal library, running locally is the way to go. Just reach out!
