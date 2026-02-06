@@ -1,4 +1,4 @@
-# MyEvidence (PubmedAI)
+# MyEvidence
 
 MyEvidence is a lightweight app for building a personal, searchable evidence library from PubMed abstracts and guideline PDFs.
 
