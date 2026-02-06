@@ -23,6 +23,12 @@ This is meant to feel like a lightweight, practical tool — not a research plat
 - Save it into your local database
 - I recommend keeping additions to RCTs, meta-analyses, and systematic reviews to avoid diluting level of evide
 
+### ✅ Search PubMed cleanly
+- Limited, clean search options
+- Results automatically hide:
+  - articles already saved in your local DB
+  - articles you marked as **Don't show again**
+
 ### ✅ Turn guideline PDFs into something readable
 - Upload a guideline PDF (the PDF file itself isn’t stored — only extracted text + your curated display)
 - Auto-extract recommendations, categorized into sections (Labs, Imaging, Disposition, etc.)
@@ -61,6 +67,15 @@ This is meant to feel like a lightweight, practical tool — not a research plat
 
 ### 3) Generate meta (qualitative synthesis)
 - Pick any mix of saved papers + guidelines and generate a single-paragraph answer to a **focused clinical question**.
+
+### 4) Search PubMed
+- Search by date range plus journal/study-type filters.
+- Current journal options: **N Engl J Med**, **JAMA**, **The Lancet**.
+- Current study-type options: **Clinical Trial**, **Meta analysis**, or **Both**.
+- Each result has a **Don't show again** button.
+- Results are always filtered to remove:
+  - already-saved PMIDs
+  - previously hidden PMIDs
 
 ---
 
