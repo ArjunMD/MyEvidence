@@ -14,15 +14,25 @@ def render() -> None:
         "Browse by specialty",
         value=False,
         key="browse_by_specialty",
-        help="On: Specialty → Year. Off: Year only.",
+    )
+    guidelines_only = st.toggle(
+        "Guidelines only",
+        value=False,
+        key="browse_guidelines_only",
     )
 
     items: List[Dict[str, str]] = []
-    items.extend(list_browse_items(limit=BROWSE_MAX_ROWS))
-    items.extend(list_browse_guideline_items(limit=BROWSE_MAX_ROWS))
+    if guidelines_only:
+        items.extend(list_browse_guideline_items(limit=BROWSE_MAX_ROWS))
+    else:
+        items.extend(list_browse_items(limit=BROWSE_MAX_ROWS))
+        items.extend(list_browse_guideline_items(limit=BROWSE_MAX_ROWS))
 
     if not items:
-        st.info("No saved articles yet.")
+        if guidelines_only:
+            st.info("No saved guidelines yet.")
+        else:
+            st.info("No saved items yet.")
         st.stop()
 
     if by_specialty:
