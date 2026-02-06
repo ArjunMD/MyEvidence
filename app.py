@@ -577,7 +577,7 @@ if _open_pmid or _open_gid:
 
 page = st.sidebar.radio(
     "Navigate",
-    ["PMID → Abstract", "Guidelines (PDF Upload)", "DB Search", "DB Browse", "Generate meta", "Delete", "About", "History", "Search PubMed"],
+    ["PMID → Abstract", "Guidelines (PDF Upload)", "DB Search", "DB Browse", "Generate meta", "Search PubMed", "Delete", "About", "History"],
     index=0,
     key="nav_page",
 )
