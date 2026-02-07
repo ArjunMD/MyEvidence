@@ -29,8 +29,13 @@ _qp = _get_query_params()
 _open_pmid = _clean_pmid(_qp_first(_qp, "pmid"))
 _open_gid = (_qp_first(_qp, "gid") or "").strip()
 _open_delrec = (_qp_first(_qp, "delrec") or "").strip()
+_open_abs_pmid = _clean_pmid(_qp_first(_qp, "open_abs_pmid"))
 
-if _open_pmid or _open_gid:
+if _open_abs_pmid:
+    st.session_state["nav_page"] = "PMID → Abstract"
+    st.session_state["pmid_input"] = _open_abs_pmid
+    _clear_query_params()
+elif _open_pmid or _open_gid:
     st.session_state["nav_page"] = "DB Search"
     st.session_state["db_search_any"] = ""
 

@@ -234,17 +234,31 @@ def render() -> None:
     for r in visible_rows:
         title = (r.get("title") or "").strip() or "(no title)"
         pmid = (r.get("pmid") or "").strip() or "—"
-        c_left, c_right = st.columns([5, 2])
+        c_left, c_right = st.columns([5, 3])
         with c_left:
             st.markdown(f"- {title} — `{pmid}`")
         with c_right:
-            if pmid != "—" and st.button(
-                "Don't show again",
-                key=f"search_pubmed_hide_{pmid}",
-                width="stretch",
-            ):
-                hide_pubmed_pmid(pmid)
-                st.rerun()
+            if pmid != "—":
+                b1, b2 = st.columns(2, gap="small")
+                with b1:
+                    if st.button(
+                        "Don't show again",
+                        key=f"search_pubmed_hide_{pmid}",
+                        use_container_width=True,
+                    ):
+                        hide_pubmed_pmid(pmid)
+                        st.rerun()
+                with b2:
+                    if st.button(
+                        "Open abstract",
+                        key=f"search_pubmed_open_abstract_{pmid}",
+                        use_container_width=True,
+                    ):
+                        try:
+                            st.query_params["open_abs_pmid"] = pmid
+                        except Exception:
+                            st.experimental_set_query_params(open_abs_pmid=pmid)
+                        st.rerun()
 
     st.divider()
     _render_search_ledger()
