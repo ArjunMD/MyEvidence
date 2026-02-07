@@ -349,7 +349,7 @@ def gpt_generate_meta_combined(
             "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
             "- If studies or guidelines conflict or are too heterogeneous/unclear, say so plainly.",
             "- Mention key limitations that are explicitly apparent without overreaching.",
-            "- Output must be a single paragraph (no bullets, no headings).",
+            "- Output can be a single paragraph, but it can also include a few brief bullet points if that helps clarity.",
             "- When making a substantive claim, cite the source label(s) in parentheses (e.g., STUDY 2; GUIDELINE 5).",
             "- Tone: Clear and organized",
         ]
@@ -379,7 +379,7 @@ def gpt_generate_meta_combined(
         "model": _openai_model(),
         "instructions": instructions,
         "input": input_field,
-        "text": {"verbosity": "medium"},
+        "text": {"verbosity": "low"},
         "max_output_tokens": 10000,
         "store": False,
         "reasoning": {"effort": "medium"},
