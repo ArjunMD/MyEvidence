@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 import streamlit as st
 
-from db import hide_pubmed_pmid
+from db import get_hidden_pubmed_pmids, get_saved_pmids, hide_pubmed_pmid
 from extract import search_pubmed_by_date_filters
 from pages_shared import _filter_search_pubmed_rows
 
@@ -81,6 +81,19 @@ def render() -> None:
         return
 
     rows = st.session_state.get("search_pubmed_rows") or []
+    result_pmids = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        pmid = (r.get("pmid") or "").strip()
+        if pmid:
+            result_pmids.append(pmid)
+    result_pmid_set = set(result_pmids)
+    saved_in_results = result_pmid_set.intersection(get_saved_pmids(result_pmids))
+    hidden_in_results = result_pmid_set.intersection(get_hidden_pubmed_pmids(result_pmids))
+    saved_count = len(saved_in_results)
+    hidden_only_count = len(hidden_in_results.difference(saved_in_results))
+
     rows = _filter_search_pubmed_rows(rows)
     rng = st.session_state.get("search_pubmed_range") or {}
     start_s = (rng.get("start") or "").strip()
@@ -88,11 +101,14 @@ def render() -> None:
     filters = st.session_state.get("search_pubmed_filters") or {}
     journal_label = (filters.get("journal") or "").strip()
     study_type_label = (filters.get("study_type") or "").strip()
+    header_bits = []
     if start_s and end_s:
-        st.caption(f"Range: {start_s} to {end_s}")
+        header_bits.append(f"Range: {start_s} to {end_s}")
     if journal_label or study_type_label:
-        st.caption(f"Filters: {journal_label or '—'} • {study_type_label or '—'}")
-    st.caption("Saved articles and items marked `Don't show again` are automatically excluded.")
+        header_bits.append(f"Filters: {journal_label or '—'} • {study_type_label or '—'}")
+    if header_bits:
+        st.caption(" | ".join(header_bits))
+    st.caption("Saved articles and items marked 'Don't show again' are automatically excluded.")
 
     if not rows:
         st.info("No matching articles found for this date range and filter selection.")
