@@ -498,15 +498,21 @@ def get_top_neighbors(pmid: str, top_n: int = 5) -> List[Dict[str, str]]:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
+def search_pubmed_pmids_page(
+    term: str,
+    mindate: str,
+    maxdate: str,
+    retmax: int = 200,
+    retstart: int = 0,
+) -> Dict[str, object]:
     q = (term or "").strip()
     if not q:
-        return []
+        return {"pmids": [], "total_count": 0}
 
     md = (mindate or "").strip()
     xd = (maxdate or "").strip()
     if not md or not xd:
-        return []
+        return {"pmids": [], "total_count": 0}
 
     sess = _requests_session()
     params = {
@@ -514,6 +520,7 @@ def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200
         "term": q,
         "retmode": "json",
         "retmax": str(max(1, int(retmax))),
+        "retstart": str(max(0, int(retstart))),
         "sort": "pub date",
         "datetype": "pdat",
         "mindate": md,
@@ -524,7 +531,13 @@ def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200
     r.raise_for_status()
 
     payload = r.json() or {}
-    idlist = ((payload.get("esearchresult") or {}).get("idlist") or [])
+    esearch = payload.get("esearchresult") or {}
+    idlist = esearch.get("idlist") or []
+    total_count_raw = str(esearch.get("count") or "").strip()
+    try:
+        total_count = int(total_count_raw)
+    except Exception:
+        total_count = 0
 
     out: List[str] = []
     seen = set()
@@ -534,19 +547,55 @@ def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200
             continue
         seen.add(p)
         out.append(p)
+    return {"pmids": out, "total_count": int(total_count)}
+
+
+def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
+    page = search_pubmed_pmids_page(
+        term=term,
+        mindate=mindate,
+        maxdate=maxdate,
+        retmax=retmax,
+        retstart=0,
+    )
+    return [str(p).strip() for p in (page.get("pmids") or []) if str(p).strip()]
+
+
+def _fetch_pubmed_titles_for_pmids(pmids: List[str]) -> Dict[str, str]:
+    ids: List[str] = []
+    seen = set()
+    for raw in (pmids or []):
+        p = str(raw or "").strip()
+        if not p or p in seen:
+            continue
+        seen.add(p)
+        ids.append(p)
+
+    if not ids:
+        return {}
+
+    out: Dict[str, str] = {}
+    chunk_size = 200
+    for i in range(0, len(ids), chunk_size):
+        chunk = ids[i : i + chunk_size]
+        if not chunk:
+            continue
+        esum_xml = fetch_pubmed_esummary_xml(",".join(chunk))
+        out.update(parse_esummary_titles(esum_xml))
     return out
 
 
-def search_pubmed_by_date_filters(
+def search_pubmed_by_date_filters_page(
     start_date: str,
     end_date: str,
     journal_term: str,
     publication_type_terms: List[str],
     retmax: int = 200,
-) -> List[Dict[str, str]]:
+    retstart: int = 0,
+) -> Dict[str, object]:
     """
-    Return PubMed results in a publication-date range using journal + publication-type terms.
-    Date format expected: YYYY/MM/DD.
+    Return one page of PubMed results in a publication-date range using journal +
+    publication-type terms. Date format expected: YYYY/MM/DD.
     """
     journal_q = (journal_term or "").strip()
     pub_type_terms = [(t or "").strip() for t in (publication_type_terms or []) if (t or "").strip()]
@@ -561,16 +610,41 @@ def search_pubmed_by_date_filters(
             term_bits.append("(" + " OR ".join(pub_type_terms) + ")")
 
     if not term_bits:
-        return []
+        return {"rows": [], "total_count": 0}
 
     term = " AND ".join(term_bits)
-    pmids = search_pubmed_pmids(term=term, mindate=start_date, maxdate=end_date, retmax=retmax)
+    page = search_pubmed_pmids_page(
+        term=term,
+        mindate=start_date,
+        maxdate=end_date,
+        retmax=retmax,
+        retstart=retstart,
+    )
+    pmids = [str(p).strip() for p in (page.get("pmids") or []) if str(p).strip()]
     if not pmids:
-        return []
+        return {"rows": [], "total_count": int(page.get("total_count") or 0)}
 
-    esum_xml = fetch_pubmed_esummary_xml(",".join(pmids))
-    titles = parse_esummary_titles(esum_xml)
-    return [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
+    titles = _fetch_pubmed_titles_for_pmids(pmids)
+    rows = [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
+    return {"rows": rows, "total_count": int(page.get("total_count") or 0)}
+
+
+def search_pubmed_by_date_filters(
+    start_date: str,
+    end_date: str,
+    journal_term: str,
+    publication_type_terms: List[str],
+    retmax: int = 200,
+) -> List[Dict[str, str]]:
+    page = search_pubmed_by_date_filters_page(
+        start_date=start_date,
+        end_date=end_date,
+        journal_term=journal_term,
+        publication_type_terms=publication_type_terms,
+        retmax=retmax,
+        retstart=0,
+    )
+    return [r for r in (page.get("rows") or []) if isinstance(r, dict)]
 
 
 # ---------------- OpenAI helpers ----------------

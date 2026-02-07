@@ -79,6 +79,28 @@ def ensure_schema() -> None:
             );
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS search_pubmed_ledger (
+                year_month TEXT NOT NULL,
+                journal_label TEXT NOT NULL,
+                study_type_label TEXT NOT NULL,
+                total_matches INTEGER NOT NULL,
+                visible_matches INTEGER NOT NULL,
+                hidden_matches INTEGER NOT NULL,
+                is_cleared INTEGER NOT NULL,
+                is_verified INTEGER NOT NULL,
+                last_checked_at TEXT NOT NULL,
+                PRIMARY KEY (year_month, journal_label, study_type_label)
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_search_pubmed_ledger_checked
+            ON search_pubmed_ledger(last_checked_at DESC);
+            """
+        )
 
 
 def save_record(
@@ -187,6 +209,101 @@ def get_hidden_pubmed_pmids(pmids: List[str]) -> Set[str]:
             tuple(vals),
         ).fetchall()
     return {(r["pmid"] or "").strip() for r in rows if (r["pmid"] or "").strip()}
+
+
+def upsert_search_pubmed_ledger(
+    year_month: str,
+    journal_label: str,
+    study_type_label: str,
+    total_matches: int,
+    visible_matches: int,
+    hidden_matches: int,
+    is_cleared: bool,
+    is_verified: bool,
+) -> None:
+    ym = (year_month or "").strip()
+    jl = (journal_label or "").strip()
+    stype = (study_type_label or "").strip()
+    if not ym or not jl or not stype:
+        return
+
+    total_i = max(0, int(total_matches or 0))
+    visible_i = max(0, int(visible_matches or 0))
+    hidden_i = max(0, int(hidden_matches or 0))
+    now = _utc_iso_z()
+
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO search_pubmed_ledger (
+                year_month, journal_label, study_type_label,
+                total_matches, visible_matches, hidden_matches,
+                is_cleared, is_verified, last_checked_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(year_month, journal_label, study_type_label) DO UPDATE SET
+                total_matches=excluded.total_matches,
+                visible_matches=excluded.visible_matches,
+                hidden_matches=excluded.hidden_matches,
+                is_cleared=excluded.is_cleared,
+                is_verified=excluded.is_verified,
+                last_checked_at=excluded.last_checked_at;
+            """,
+            (
+                ym,
+                jl,
+                stype,
+                total_i,
+                visible_i,
+                hidden_i,
+                1 if bool(is_cleared) else 0,
+                1 if bool(is_verified) else 0,
+                now,
+            ),
+        )
+
+
+def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                year_month,
+                journal_label,
+                study_type_label,
+                total_matches,
+                visible_matches,
+                hidden_matches,
+                is_cleared,
+                is_verified,
+                last_checked_at
+            FROM search_pubmed_ledger
+            ORDER BY
+                journal_label COLLATE NOCASE ASC,
+                study_type_label COLLATE NOCASE ASC,
+                CAST(SUBSTR(year_month, 1, 4) AS INTEGER) DESC,
+                CAST(SUBSTR(year_month, 6, 2) AS INTEGER) ASC
+            LIMIT ?;
+            """,
+            (max(1, int(limit or 100)),),
+        ).fetchall()
+
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        out.append(
+            {
+                "year_month": (r["year_month"] or "").strip(),
+                "journal_label": (r["journal_label"] or "").strip(),
+                "study_type_label": (r["study_type_label"] or "").strip(),
+                "total_matches": str(int(r["total_matches"] or 0)),
+                "visible_matches": str(int(r["visible_matches"] or 0)),
+                "hidden_matches": str(int(r["hidden_matches"] or 0)),
+                "is_cleared": "1" if int(r["is_cleared"] or 0) == 1 else "0",
+                "is_verified": "1" if int(r["is_verified"] or 0) == 1 else "0",
+                "last_checked_at": (r["last_checked_at"] or "").strip(),
+            }
+        )
+    return out
 
 
 def db_count() -> int:
