@@ -7,6 +7,25 @@ from db import list_browse_guideline_items, list_browse_items
 from pages_shared import BROWSE_MAX_ROWS, _browse_search_link, _split_specialties, _year_sort_key
 
 
+def _month_sort_value(item: Dict[str, str]) -> int:
+    if (item.get("type") or "").strip().lower() == "guideline":
+        return 0
+    raw = (item.get("pub_month") or "").strip()
+    if raw.isdigit():
+        n = int(raw)
+        if 1 <= n <= 12:
+            return n
+    return 0
+
+
+def _browse_item_sort_key(item: Dict[str, str]) -> tuple:
+    item_type = (item.get("type") or "").lower()
+    title = (item.get("title") or "").lower()
+    pmid = (item.get("pmid") or "").lower()
+    gid = (item.get("guideline_id") or "").lower()
+    return (item_type, -_month_sort_value(item), title, pmid, gid)
+
+
 def render() -> None:
     st.title("🗂️ Browse")
 
@@ -52,7 +71,8 @@ def render() -> None:
             with st.expander(spec, expanded=False):
                 for y in years:
                     st.markdown(f"**{y}**")
-                    for it in years_map.get(y, []):
+                    rows = sorted(years_map.get(y, []), key=_browse_item_sort_key)
+                    for it in rows:
                         if (it.get("type") or "") == "guideline":
                             title = (it.get("title") or "").strip() or "(no name)"
                             gid = (it.get("guideline_id") or "").strip()
@@ -105,14 +125,7 @@ def render() -> None:
             st.markdown(f"### {y}")
 
             rows = by_year.get(y, [])
-            rows = sorted(
-                rows,
-                key=lambda r: (
-                    (r.get("type") or "").lower(),
-                    (r.get("title") or "").lower(),
-                    (r.get("pmid") or "").lower(),
-                ),
-            )
+            rows = sorted(rows, key=_browse_item_sort_key)
 
             for it in rows:
                 if (it.get("type") or "") == "guideline":

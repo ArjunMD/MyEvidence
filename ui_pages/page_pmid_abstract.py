@@ -17,6 +17,7 @@ from extract import (
     gpt_extract_study_design,
     parse_abstract,
     parse_journal,
+    parse_pub_month,
     parse_title,
     parse_year,
 )
@@ -40,7 +41,7 @@ def render() -> None:
             st.stop()
 
         if is_saved(pmid):
-            for k in ["last_pmid", "last_abstract", "last_year", "last_journal", "last_title"]:
+            for k in ["last_pmid", "last_abstract", "last_year", "last_pub_month", "last_journal", "last_title"]:
                 st.session_state.pop(k, None)
             st.info(f"PMID {pmid} is saved in your database.")
             st.stop()
@@ -50,12 +51,14 @@ def render() -> None:
                 xml_text = fetch_pubmed_xml(pmid)
                 abstract = parse_abstract(xml_text)
                 year = parse_year(xml_text)
+                pub_month = parse_pub_month(xml_text)
                 journal = parse_journal(xml_text)
                 title = parse_title(xml_text)
 
                 st.session_state["last_pmid"] = pmid
                 st.session_state["last_abstract"] = abstract
                 st.session_state["last_year"] = year
+                st.session_state["last_pub_month"] = pub_month
                 st.session_state["last_journal"] = journal
                 st.session_state["last_title"] = title
             except requests.HTTPError as e:
@@ -196,6 +199,7 @@ def render() -> None:
     last_pmid = st.session_state.get("last_pmid")
     last_abstract = (st.session_state.get("last_abstract") or "").strip()
     last_year = (st.session_state.get("last_year") or "").strip()
+    last_pub_month = (st.session_state.get("last_pub_month") or "").strip()
     last_journal = (st.session_state.get("last_journal") or "").strip()
     last_title = (st.session_state.get("last_title") or "").strip()
 
@@ -212,7 +216,10 @@ def render() -> None:
             if last_journal:
                 meta_bits.append(last_journal)
             if last_year:
-                meta_bits.append(last_year)
+                if last_pub_month:
+                    meta_bits.append(f"{last_year}-{last_pub_month}")
+                else:
+                    meta_bits.append(last_year)
             if meta_bits:
                 st.caption(" • ".join(meta_bits))
 
@@ -253,6 +260,7 @@ def render() -> None:
                                     last_title,
                                     last_abstract,
                                     last_year,
+                                    last_pub_month,
                                     last_journal,
                                     parsed_n,
                                     parsed_design,

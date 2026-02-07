@@ -64,6 +64,33 @@ META_MAX_CHARS_PER_STUDY = 10000
 
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
+_PUBMED_MONTH_NAME_TO_NUM = {
+    "jan": "01",
+    "january": "01",
+    "feb": "02",
+    "february": "02",
+    "mar": "03",
+    "march": "03",
+    "apr": "04",
+    "april": "04",
+    "may": "05",
+    "jun": "06",
+    "june": "06",
+    "jul": "07",
+    "july": "07",
+    "aug": "08",
+    "august": "08",
+    "sep": "09",
+    "sept": "09",
+    "september": "09",
+    "oct": "10",
+    "october": "10",
+    "nov": "11",
+    "november": "11",
+    "dec": "12",
+    "december": "12",
+}
+
 # ---------------- Section-based recommendation pipeline ----------------
 
 def _heading_level(line: str) -> int:
@@ -273,6 +300,62 @@ def parse_year(xml_text: str) -> str:
         year = _itertext(root.find(path))
         if year:
             return year
+
+    return ""
+
+
+def _parse_pubmed_month_token(raw: str) -> str:
+    token = (raw or "").strip().lower().replace(".", "")
+    if not token:
+        return ""
+
+    if re.fullmatch(r"\d{1,2}", token):
+        n = int(token)
+        if 1 <= n <= 12:
+            return f"{n:02d}"
+        return ""
+
+    first = re.split(r"[\s\-/]+", token)[0]
+    if not first:
+        return ""
+    if first in _PUBMED_MONTH_NAME_TO_NUM:
+        return _PUBMED_MONTH_NAME_TO_NUM[first]
+    return _PUBMED_MONTH_NAME_TO_NUM.get(first[:3], "")
+
+
+def _parse_pubmed_month_from_medline_date(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    m = re.search(
+        r"(?i)\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+        r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|"
+        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\b",
+        s,
+    )
+    if not m:
+        return ""
+    return _parse_pubmed_month_token(m.group(1))
+
+
+def parse_pub_month(xml_text: str) -> str:
+    root = ET.fromstring(xml_text)
+
+    for path in [
+        ".//JournalIssue/PubDate/Month",
+        ".//ArticleDate/Month",
+        ".//DateCreated/Month",
+        ".//DateCompleted/Month",
+    ]:
+        month = _parse_pubmed_month_token(_itertext(root.find(path)))
+        if month:
+            return month
+
+    medline = _itertext(root.find(".//JournalIssue/PubDate/MedlineDate"))
+    if medline:
+        month = _parse_pubmed_month_from_medline_date(medline)
+        if month:
+            return month
 
     return ""
 

@@ -49,6 +49,7 @@ def ensure_schema() -> None:
                 title TEXT,
                 abstract TEXT NOT NULL,
                 year TEXT,
+                pub_month TEXT,
                 journal TEXT,
                 patient_n INTEGER,
                 study_design TEXT,
@@ -63,6 +64,10 @@ def ensure_schema() -> None:
         # Migration: add uploaded_at for History page (existing rows get NULL)
         try:
             conn.execute("ALTER TABLE abstracts ADD COLUMN uploaded_at TEXT;")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE abstracts ADD COLUMN pub_month TEXT;")
         except sqlite3.OperationalError:
             pass
 
@@ -81,6 +86,7 @@ def save_record(
     title: str,
     abstract: str,
     year: str,
+    pub_month: str,
     journal: str,
     patient_n: Optional[int],
     study_design: Optional[str],
@@ -95,17 +101,18 @@ def save_record(
         conn.execute(
             """
             INSERT INTO abstracts (
-                pmid, title, abstract, year, journal, patient_n, study_design,
+                pmid, title, abstract, year, pub_month, journal, patient_n, study_design,
                 patient_details, intervention_comparison, authors_conclusions, results,
                 specialty, uploaded_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 pmid,
                 title,
                 abstract,
                 year,
+                pub_month,
                 journal,
                 patient_n,
                 study_design,
@@ -280,7 +287,7 @@ def list_browse_items(limit: int) -> List[Dict[str, str]]:
     with _connect_db() as conn:
         rows = conn.execute(
             """
-            SELECT pmid, title, year, journal, patient_n, specialty, authors_conclusions
+            SELECT pmid, title, year, pub_month, journal, patient_n, specialty, authors_conclusions
             FROM abstracts
             ORDER BY
                 specialty COLLATE NOCASE ASC,
@@ -298,6 +305,7 @@ def list_browse_items(limit: int) -> List[Dict[str, str]]:
                 "pmid": (r["pmid"] or "").strip(),
                 "title": (r["title"] or "").strip(),
                 "year": (r["year"] or "").strip(),
+                "pub_month": (r["pub_month"] or "").strip(),
                 "journal": (r["journal"] or "").strip(),
                 "patient_n": str(r["patient_n"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
@@ -311,7 +319,7 @@ def get_record(pmid: str) -> Dict[str, str]:
     with _connect_db() as conn:
         row = conn.execute(
             """
-            SELECT pmid, title, abstract, year, journal, patient_n, study_design,
+            SELECT pmid, title, abstract, year, pub_month, journal, patient_n, study_design,
                    patient_details, intervention_comparison, authors_conclusions, results,
                    specialty
             FROM abstracts
@@ -326,6 +334,7 @@ def get_record(pmid: str) -> Dict[str, str]:
             "title": (row["title"] or "").strip(),
             "abstract": (row["abstract"] or "").strip(),
             "year": (row["year"] or "").strip(),
+            "pub_month": (row["pub_month"] or "").strip(),
             "journal": (row["journal"] or "").strip(),
             "patient_n": "" if row["patient_n"] is None else str(int(row["patient_n"])),
             "study_design": (row["study_design"] or "").strip(),
