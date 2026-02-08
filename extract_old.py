@@ -64,33 +64,6 @@ META_MAX_CHARS_PER_STUDY = 10000
 
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
-_PUBMED_MONTH_NAME_TO_NUM = {
-    "jan": "01",
-    "january": "01",
-    "feb": "02",
-    "february": "02",
-    "mar": "03",
-    "march": "03",
-    "apr": "04",
-    "april": "04",
-    "may": "05",
-    "jun": "06",
-    "june": "06",
-    "jul": "07",
-    "july": "07",
-    "aug": "08",
-    "august": "08",
-    "sep": "09",
-    "sept": "09",
-    "september": "09",
-    "oct": "10",
-    "october": "10",
-    "nov": "11",
-    "november": "11",
-    "dec": "12",
-    "december": "12",
-}
-
 # ---------------- Section-based recommendation pipeline ----------------
 
 def _heading_level(line: str) -> int:
@@ -304,62 +277,6 @@ def parse_year(xml_text: str) -> str:
     return ""
 
 
-def _parse_pubmed_month_token(raw: str) -> str:
-    token = (raw or "").strip().lower().replace(".", "")
-    if not token:
-        return ""
-
-    if re.fullmatch(r"\d{1,2}", token):
-        n = int(token)
-        if 1 <= n <= 12:
-            return f"{n:02d}"
-        return ""
-
-    first = re.split(r"[\s\-/]+", token)[0]
-    if not first:
-        return ""
-    if first in _PUBMED_MONTH_NAME_TO_NUM:
-        return _PUBMED_MONTH_NAME_TO_NUM[first]
-    return _PUBMED_MONTH_NAME_TO_NUM.get(first[:3], "")
-
-
-def _parse_pubmed_month_from_medline_date(raw: str) -> str:
-    s = (raw or "").strip()
-    if not s:
-        return ""
-    m = re.search(
-        r"(?i)\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
-        r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|"
-        r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\b",
-        s,
-    )
-    if not m:
-        return ""
-    return _parse_pubmed_month_token(m.group(1))
-
-
-def parse_pub_month(xml_text: str) -> str:
-    root = ET.fromstring(xml_text)
-
-    for path in [
-        ".//JournalIssue/PubDate/Month",
-        ".//ArticleDate/Month",
-        ".//DateCreated/Month",
-        ".//DateCompleted/Month",
-    ]:
-        month = _parse_pubmed_month_token(_itertext(root.find(path)))
-        if month:
-            return month
-
-    medline = _itertext(root.find(".//JournalIssue/PubDate/MedlineDate"))
-    if medline:
-        month = _parse_pubmed_month_from_medline_date(medline)
-        if month:
-            return month
-
-    return ""
-
-
 def parse_journal(xml_text: str) -> str:
     root = ET.fromstring(xml_text)
     journal = _itertext(root.find(".//Journal/Title"))
@@ -498,21 +415,15 @@ def get_top_neighbors(pmid: str, top_n: int = 5) -> List[Dict[str, str]]:
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
-def search_pubmed_pmids_page(
-    term: str,
-    mindate: str,
-    maxdate: str,
-    retmax: int = 200,
-    retstart: int = 0,
-) -> Dict[str, object]:
+def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
     q = (term or "").strip()
     if not q:
-        return {"pmids": [], "total_count": 0}
+        return []
 
     md = (mindate or "").strip()
     xd = (maxdate or "").strip()
     if not md or not xd:
-        return {"pmids": [], "total_count": 0}
+        return []
 
     sess = _requests_session()
     params = {
@@ -520,7 +431,6 @@ def search_pubmed_pmids_page(
         "term": q,
         "retmode": "json",
         "retmax": str(max(1, int(retmax))),
-        "retstart": str(max(0, int(retstart))),
         "sort": "pub date",
         "datetype": "pdat",
         "mindate": md,
@@ -531,13 +441,7 @@ def search_pubmed_pmids_page(
     r.raise_for_status()
 
     payload = r.json() or {}
-    esearch = payload.get("esearchresult") or {}
-    idlist = esearch.get("idlist") or []
-    total_count_raw = str(esearch.get("count") or "").strip()
-    try:
-        total_count = int(total_count_raw)
-    except Exception:
-        total_count = 0
+    idlist = ((payload.get("esearchresult") or {}).get("idlist") or [])
 
     out: List[str] = []
     seen = set()
@@ -547,55 +451,19 @@ def search_pubmed_pmids_page(
             continue
         seen.add(p)
         out.append(p)
-    return {"pmids": out, "total_count": int(total_count)}
-
-
-def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
-    page = search_pubmed_pmids_page(
-        term=term,
-        mindate=mindate,
-        maxdate=maxdate,
-        retmax=retmax,
-        retstart=0,
-    )
-    return [str(p).strip() for p in (page.get("pmids") or []) if str(p).strip()]
-
-
-def _fetch_pubmed_titles_for_pmids(pmids: List[str]) -> Dict[str, str]:
-    ids: List[str] = []
-    seen = set()
-    for raw in (pmids or []):
-        p = str(raw or "").strip()
-        if not p or p in seen:
-            continue
-        seen.add(p)
-        ids.append(p)
-
-    if not ids:
-        return {}
-
-    out: Dict[str, str] = {}
-    chunk_size = 200
-    for i in range(0, len(ids), chunk_size):
-        chunk = ids[i : i + chunk_size]
-        if not chunk:
-            continue
-        esum_xml = fetch_pubmed_esummary_xml(",".join(chunk))
-        out.update(parse_esummary_titles(esum_xml))
     return out
 
 
-def search_pubmed_by_date_filters_page(
+def search_pubmed_by_date_filters(
     start_date: str,
     end_date: str,
     journal_term: str,
     publication_type_terms: List[str],
     retmax: int = 200,
-    retstart: int = 0,
-) -> Dict[str, object]:
+) -> List[Dict[str, str]]:
     """
-    Return one page of PubMed results in a publication-date range using journal +
-    publication-type terms. Date format expected: YYYY/MM/DD.
+    Return PubMed results in a publication-date range using journal + publication-type terms.
+    Date format expected: YYYY/MM/DD.
     """
     journal_q = (journal_term or "").strip()
     pub_type_terms = [(t or "").strip() for t in (publication_type_terms or []) if (t or "").strip()]
@@ -610,41 +478,16 @@ def search_pubmed_by_date_filters_page(
             term_bits.append("(" + " OR ".join(pub_type_terms) + ")")
 
     if not term_bits:
-        return {"rows": [], "total_count": 0}
+        return []
 
     term = " AND ".join(term_bits)
-    page = search_pubmed_pmids_page(
-        term=term,
-        mindate=start_date,
-        maxdate=end_date,
-        retmax=retmax,
-        retstart=retstart,
-    )
-    pmids = [str(p).strip() for p in (page.get("pmids") or []) if str(p).strip()]
+    pmids = search_pubmed_pmids(term=term, mindate=start_date, maxdate=end_date, retmax=retmax)
     if not pmids:
-        return {"rows": [], "total_count": int(page.get("total_count") or 0)}
+        return []
 
-    titles = _fetch_pubmed_titles_for_pmids(pmids)
-    rows = [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
-    return {"rows": rows, "total_count": int(page.get("total_count") or 0)}
-
-
-def search_pubmed_by_date_filters(
-    start_date: str,
-    end_date: str,
-    journal_term: str,
-    publication_type_terms: List[str],
-    retmax: int = 200,
-) -> List[Dict[str, str]]:
-    page = search_pubmed_by_date_filters_page(
-        start_date=start_date,
-        end_date=end_date,
-        journal_term=journal_term,
-        publication_type_terms=publication_type_terms,
-        retmax=retmax,
-        retstart=0,
-    )
-    return [r for r in (page.get("rows") or []) if isinstance(r, dict)]
+    esum_xml = fetch_pubmed_esummary_xml(",".join(pmids))
+    titles = parse_esummary_titles(esum_xml)
+    return [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
 
 
 # ---------------- OpenAI helpers ----------------
@@ -1519,19 +1362,15 @@ def _azure_di_client() -> "DocumentIntelligenceClientType":
     return DocumentIntelligenceClient(endpoint=_azure_di_endpoint(), credential=AzureKeyCredential(_azure_di_key()))
 
 
-def analyze_pdf_to_markdown_azure(pdf_bytes: bytes, pages: str = "", timeout_s: Optional[float] = None) -> str:
+def analyze_pdf_to_markdown_azure(pdf_bytes: bytes) -> str:
     client = _azure_di_client()
     body = io.BytesIO(pdf_bytes)
-    kwargs = {}
-    if (pages or "").strip():
-        kwargs["pages"] = (pages or "").strip()
 
     try:
         poller = client.begin_analyze_document(
             model_id="prebuilt-layout",
             body=body,
             output_content_format=DocumentContentFormat.MARKDOWN,
-            **kwargs,
         )
     except Exception:
         body.seek(0)
@@ -1539,13 +1378,9 @@ def analyze_pdf_to_markdown_azure(pdf_bytes: bytes, pages: str = "", timeout_s: 
             model_id="prebuilt-layout",
             body=body,
             output_content_format="markdown",
-            **kwargs,
         )
 
-    if timeout_s is not None and float(timeout_s) > 0:
-        result = poller.result(timeout=float(timeout_s))
-    else:
-        result = poller.result()
+    result = poller.result()
     return (getattr(result, "content", "") or "").strip()
 
 
@@ -2019,16 +1854,7 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
     if not meta:
         return {}
 
-    md = ""
-    try:
-        # Metadata does not need full-document OCR; keep this fast and bounded.
-        md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-5", timeout_s=35.0)
-    except Exception:
-        try:
-            md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-2", timeout_s=20.0)
-        except Exception:
-            md = ""
-
+    md = markdown_from_pdf_bytes(pdf_bytes)
     if not md:
         return {}
 

@@ -45,6 +45,7 @@ def render() -> None:
                 try:
                     with st.spinner("Extracting metadata (name/year/specialty)…"):
                         outm = extract_and_store_guideline_metadata_azure(gid_saved, pdf_bytes)
+                    st.caption("Reached: metadata extraction returned.")
                     if isinstance(outm, dict):
                         extracted_meta = {
                             "gid": gid_saved,
@@ -52,7 +53,8 @@ def render() -> None:
                             "year": str(outm.get("pub_year") or "").strip(),
                             "spec": str(outm.get("specialty") or "").strip(),
                         }
-                except Exception:
+                except Exception as e:
+                    st.warning(f"Metadata extraction failed/skipped: {e}")
                     extracted_meta = {}
 
                 n_recs = 0
