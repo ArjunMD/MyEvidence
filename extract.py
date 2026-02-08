@@ -4,7 +4,7 @@ import time
 import random
 import json
 import io
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 import requests
 import streamlit as st
@@ -725,11 +725,13 @@ def _post_with_retries(
     headers: Dict[str, str],
     json: Dict,
     timeout: int = 30,
+    max_attempts: int = 5,
 ) -> requests.Response:
     sess = _requests_session()
     last_exc: Optional[Exception] = None
 
-    for attempt in range(5):
+    attempts = max(1, int(max_attempts))
+    for attempt in range(attempts):
         try:
             r = sess.post(url, headers=headers, json=json, timeout=timeout)
 
@@ -867,6 +869,255 @@ def _parse_json_from_model(raw: str) -> Dict:
             return {}
 
 
+def _truncate_for_prompt(text: str, max_chars: int) -> str:
+    s = (text or "").strip()
+    if not s:
+        return ""
+    lim = max(1, int(max_chars))
+    if len(s) <= lim:
+        return s
+    return s[:lim].rstrip() + "…"
+
+
+def _cap_prior_repeat_context(
+    items: List[Dict],
+    max_chars: int = 26000,
+    max_items: int = 170,
+    head_keep: int = 45,
+) -> List[Dict]:
+    """
+    Keep a bounded prior context for repeat checks.
+    Mixes early "anchor" items with recent items to preserve global order context.
+    """
+    if not items:
+        return []
+
+    selected: List[Dict] = []
+    seen_i = set()
+    total_chars = 0
+
+    def _try_add(it: Dict) -> bool:
+        nonlocal total_chars
+        try:
+            ii = int(it.get("i"))
+        except Exception:
+            return False
+        if ii in seen_i:
+            return False
+
+        txt = (it.get("text") or "").strip()
+        if not txt:
+            return False
+        cost = len(txt) + 24
+        if selected and (len(selected) >= max_items or (total_chars + cost > max_chars)):
+            return False
+
+        selected.append({"i": ii, "text": txt})
+        seen_i.add(ii)
+        total_chars += cost
+        return True
+
+    head_n = min(max(0, int(head_keep)), len(items))
+    for it in items[:head_n]:
+        _try_add(it)
+        if len(selected) >= max_items:
+            break
+
+    if len(selected) < max_items:
+        for it in reversed(items[head_n:]):
+            _try_add(it)
+            if len(selected) >= max_items:
+                break
+
+    selected.sort(key=lambda x: int(x.get("i") or 0))
+    return selected
+
+
+def _openai_global_repeat_post_pass(
+    recs: List[Dict[str, str]],
+    i_to_section: Dict[int, str],
+    progress_cb=None,
+) -> Set[int]:
+    """
+    Global post-pass for repeats:
+    - works in original recommendation order (lower i appears earlier in source)
+    - only marks *later* recommendations as repeats
+    - skips items already in "Possible repeats"
+    """
+    key = _openai_api_key()
+    if not key:
+        return set()
+
+    check_items: List[Dict] = []
+    ii = 0
+    for r in recs or []:
+        txt = (r.get("recommendation_text") or "").strip()
+        if not txt:
+            continue
+        ii += 1
+        section_now = _safe_section_label(i_to_section.get(ii, "Other"))
+        if section_now == "Possible repeats":
+            continue
+        check_items.append({"i": ii, "text": _truncate_for_prompt(txt, 1200)})
+
+    if len(check_items) < 2:
+        return set()
+
+    def _progress(done=0, total=0, msg="", detail=""):
+        if not progress_cb:
+            return
+        try:
+            progress_cb(done, total, msg=msg, detail=detail)
+        except TypeError:
+            try:
+                progress_cb(done, total, msg or detail or "")
+            except TypeError:
+                progress_cb(done, total)
+
+    instructions = (
+        "You are running a global post-pass to detect later duplicate/near-duplicate guideline recommendations.\n"
+        "Return ONLY valid JSON with this exact shape:\n"
+        "{\"items\":[{\"i\":12,\"duplicate_of\":3}]}\n\n"
+        "Input JSON contains:\n"
+        "- prior_items: recommendations that appeared earlier and are already kept as non-repeats.\n"
+        "- batch_items: the next recommendations in original order.\n\n"
+        "Rules:\n"
+        "- Mark ONLY batch_items that are later duplicates/near-duplicates of earlier recommendations.\n"
+        "- 'Earlier' means: any prior_item, or a lower-numbered item in the same batch.\n"
+        "- Never mark the first occurrence of an idea.\n"
+        "- i and duplicate_of must both be recommendation indices from input; duplicate_of must be < i.\n"
+        "- If uncertain, do not mark.\n"
+        "- No extra keys. No markdown. No commentary."
+    )
+
+    batches = _chunk_recs_for_classification(check_items, max_chars=10000, max_items=28)
+    total_batches = len(batches)
+    repeat_i: Set[int] = set()
+    canonical_prior: List[Dict] = []
+
+    _progress(
+        0,
+        max(1, total_batches),
+        msg="Step 4/4 — Global repeat post-pass…",
+        detail=f"Checking {len(check_items)} recommendation(s) across {total_batches} batch(es)",
+    )
+
+    for bi, batch in enumerate(batches, start=1):
+        _progress(
+            bi - 1,
+            max(1, total_batches),
+            msg="Step 4/4 — Global repeat post-pass…",
+            detail=f"Repeat check batch {bi}/{total_batches}",
+        )
+
+        prior_payload_raw = [
+            {"i": int(p.get("i") or 0), "text": _truncate_for_prompt((p.get("text") or ""), 420)}
+            for p in canonical_prior
+            if int(p.get("i") or 0) > 0
+        ]
+        prior_payload = _cap_prior_repeat_context(
+            prior_payload_raw,
+            max_chars=26000,
+            max_items=170,
+            head_keep=45,
+        )
+        batch_payload = [
+            {"i": int(b.get("i") or 0), "text": _truncate_for_prompt((b.get("text") or ""), 1000)}
+            for b in batch
+            if int(b.get("i") or 0) > 0
+        ]
+
+        if not batch_payload:
+            continue
+
+        payload = {
+            "model": _openai_model(),
+            "instructions": instructions,
+            "input": "INPUT_JSON:\n"
+            + json.dumps(
+                {
+                    "prior_items": prior_payload,
+                    "batch_items": batch_payload,
+                },
+                ensure_ascii=False,
+            )
+            + "\n\nReturn JSON now.",
+            "text": {"verbosity": "low"},
+            "max_output_tokens": 900,
+            "temperature": 0,
+            "reasoning": {"effort": "none"},
+            "store": False,
+        }
+
+        obj: Dict = {}
+        try:
+            r = _post_with_retries(
+                OPENAI_RESPONSES_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=75,
+            )
+            r.raise_for_status()
+            obj = _parse_json_from_model(_extract_output_text(r.json()))
+        except Exception:
+            obj = {}
+
+        out_items = obj.get("items") if isinstance(obj, dict) else None
+        if not isinstance(out_items, list):
+            out_items = []
+
+        prior_i_set = set()
+        for p in prior_payload:
+            try:
+                prior_i_set.add(int(p.get("i")))
+            except Exception:
+                continue
+
+        batch_i_set = set()
+        for b in batch_payload:
+            try:
+                batch_i_set.add(int(b.get("i")))
+            except Exception:
+                continue
+
+        valid_context_ids = prior_i_set | batch_i_set
+        proposed: Set[int] = set()
+
+        for oi in out_items:
+            if not isinstance(oi, dict):
+                continue
+            try:
+                i_val = int(oi.get("i"))
+                dup_of = int(oi.get("duplicate_of"))
+            except Exception:
+                continue
+            if i_val not in batch_i_set:
+                continue
+            if dup_of not in valid_context_ids:
+                continue
+            if dup_of >= i_val:
+                continue
+            proposed.add(i_val)
+
+        for b in batch_payload:
+            i_val = int(b.get("i") or 0)
+            if i_val <= 0:
+                continue
+            if i_val in proposed:
+                repeat_i.add(i_val)
+                continue
+            canonical_prior.append({"i": i_val, "text": (b.get("text") or "")})
+
+        _progress(
+            bi,
+            max(1, total_batches),
+            msg="Step 4/4 — Global repeat post-pass…",
+            detail=f"Finished repeat batch {bi}/{total_batches} • {len(repeat_i)} marked",
+        )
+
+    return repeat_i
+
+
 def gpt_generate_guideline_recommendations_display(
     recs: List[Dict[str, str]],
     meta: Optional[Dict[str, str]] = None,
@@ -874,7 +1125,7 @@ def gpt_generate_guideline_recommendations_display(
 ) -> str:
     """
     Produces markdown with clinician-friendly sections, containing EVERY recommendation.
-    OpenAI is used ONLY to classify each recommendation into a section.
+    OpenAI is used to classify recommendations and then run a global repeat post-pass.
     Rendering is deterministic to guarantee nothing is dropped.
     """
     key = _openai_api_key()
@@ -986,6 +1237,15 @@ def gpt_generate_guideline_recommendations_display(
             msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
             detail=f"Finished batch {ci}/{total_chunks}",
         )
+
+    repeat_overrides: Set[int] = set()
+    try:
+        repeat_overrides = _openai_global_repeat_post_pass(recs, i_to_section, progress_cb=_progress)
+    except Exception:
+        repeat_overrides = set()
+
+    for i_repeat in repeat_overrides:
+        i_to_section[i_repeat] = "Possible repeats"
 
     _progress(
         max(1, total_chunks),
@@ -1117,7 +1377,12 @@ def _strip_digits(text: str) -> str:
 # ---------------- OpenAI extractors ----------------
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
-def gpt_extract_specialty(title: str, abstract: str) -> str:
+def gpt_extract_specialty(
+    title: str,
+    abstract: str,
+    timeout_s: int = 30,
+    max_attempts: int = 5,
+) -> str:
     key = _openai_api_key()
     if not key:
         raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
@@ -1153,7 +1418,8 @@ def gpt_extract_specialty(title: str, abstract: str) -> str:
         OPENAI_RESPONSES_URL,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=30,
+        timeout=max(5, int(timeout_s)),
+        max_attempts=max(1, int(max_attempts)),
     )
     r.raise_for_status()
 
@@ -1950,7 +2216,12 @@ def _guideline_meta_snippet(md: str, max_chars: int = 9000) -> str:
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
-def gpt_extract_guideline_title_year(filename: str, snippet: str) -> Dict[str, str]:
+def gpt_extract_guideline_title_year(
+    filename: str,
+    snippet: str,
+    timeout_s: int = 60,
+    max_attempts: int = 5,
+) -> Dict[str, str]:
     key = _openai_api_key()
     if not key:
         raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
@@ -1986,7 +2257,8 @@ def gpt_extract_guideline_title_year(filename: str, snippet: str) -> Dict[str, s
         OPENAI_RESPONSES_URL,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=60,
+        timeout=max(5, int(timeout_s)),
+        max_attempts=max(1, int(max_attempts)),
     )
     r.raise_for_status()
 
@@ -2022,10 +2294,10 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
     md = ""
     try:
         # Metadata does not need full-document OCR; keep this fast and bounded.
-        md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-5", timeout_s=35.0)
+        md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-5", timeout_s=18.0)
     except Exception:
         try:
-            md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-2", timeout_s=20.0)
+            md = analyze_pdf_to_markdown_azure(pdf_bytes, pages="1-2", timeout_s=10.0)
         except Exception:
             md = ""
 
@@ -2038,15 +2310,18 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
     gname = ""
     year = ""
     try:
-        out = gpt_extract_guideline_title_year(fn, snippet)
+        out = gpt_extract_guideline_title_year(fn, snippet, timeout_s=15, max_attempts=1)
         gname = (out.get("guideline_name") or "").strip()
         year = _parse_year4(out.get("pub_year") or "")
     except Exception:
         gname = ""
         year = ""
 
+    if not year:
+        year = _parse_year4(snippet[:1200])
+
     try:
-        spec = gpt_extract_specialty(gname or fn, snippet)
+        spec = gpt_extract_specialty(gname or fn, snippet, timeout_s=15, max_attempts=1)
     except Exception:
         spec = ""
 
