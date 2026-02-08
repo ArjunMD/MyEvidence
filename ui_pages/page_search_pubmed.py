@@ -67,19 +67,32 @@ def _parse_year_month_key(year_month: str) -> Optional[Tuple[int, int]]:
 
 def _clearable_on_date_for_month(year: int, month: int):
     """
-    A month becomes clearable on the first day of the month after next.
-    Example: 2026-01 -> clearable on 2026-03-01 (after all of February).
+    Month is clearable 30 days after month-end to allow late indexing/backfill.
     """
-    total = (int(year) * 12) + (int(month) - 1) + 2
-    y2 = total // 12
-    m2 = (total % 12) + 1
-    return datetime(y2, m2, 1, tzinfo=timezone.utc).date()
+    end_day = int(calendar.monthrange(int(year), int(month))[1])
+    end_date = datetime(int(year), int(month), end_day, tzinfo=timezone.utc).date()
+    return end_date + timedelta(days=30)
+
+
+def _is_year_month_clearable(year_month: str, today) -> bool:
+    ym = _parse_year_month_key(year_month)
+    if ym is None:
+        return True
+    yy, mm = ym
+    return bool(today >= _clearable_on_date_for_month(yy, mm))
 
 
 def _render_search_ledger() -> None:
     st.markdown("##### Cleared Ledger")
+    st.caption("Entries are eligible to clear 30 days after month-end.")
+    today = datetime.now(timezone.utc).date()
     rows = list_search_pubmed_ledger(limit=100)
-    cleared_rows = [r for r in rows if (r.get("is_cleared") or "0") == "1"]
+    cleared_rows = [
+        r
+        for r in rows
+        if (r.get("is_cleared") or "0") == "1"
+        and _is_year_month_clearable((r.get("year_month") or "").strip(), today=today)
+    ]
     if not cleared_rows:
         st.caption("No cleared entries yet.")
         return
@@ -232,33 +245,18 @@ def render() -> None:
 
     ym_key = (rng.get("year_month") or "").strip()
     is_verified = total_count <= int(SEARCH_FETCH_LIMIT)
-    base_cleared = bool(total_count > 0 and visible_count == 0 and is_verified)
-    is_time_clearable = True
-    clearable_on_s = ""
-    ym_parsed = _parse_year_month_key(ym_key)
-    if ym_parsed is not None:
-        yy, mm = ym_parsed
-        clearable_on = _clearable_on_date_for_month(yy, mm)
-        clearable_on_s = clearable_on.isoformat()
-        is_time_clearable = bool(today >= clearable_on)
-    is_cleared = bool(base_cleared and is_time_clearable)
-
-    if base_cleared and not is_time_clearable and clearable_on_s:
-        st.info(
-            f"This month cannot be marked cleared yet. "
-            f"It becomes clearable on {clearable_on_s} (UTC)."
-        )
-    if total_count > 0:
-        upsert_search_pubmed_ledger(
-            year_month=ym_key,
-            journal_label=journal_label,
-            study_type_label=study_type_label,
-            total_matches=total_count,
-            visible_matches=visible_count,
-            hidden_matches=hidden_count,
-            is_cleared=is_cleared,
-            is_verified=is_verified,
-        )
+    is_time_clearable = _is_year_month_clearable(ym_key, today=today)
+    is_cleared = bool(visible_count == 0 and is_verified and is_time_clearable)
+    upsert_search_pubmed_ledger(
+        year_month=ym_key,
+        journal_label=journal_label,
+        study_type_label=study_type_label,
+        total_matches=total_count,
+        visible_matches=visible_count,
+        hidden_matches=hidden_count,
+        is_cleared=is_cleared,
+        is_verified=is_verified,
+    )
 
     if total_count > int(SEARCH_FETCH_LIMIT):
         st.warning(
