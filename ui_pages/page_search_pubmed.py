@@ -117,15 +117,27 @@ def render() -> None:
     default_month = int(default_month_date.month)
     min_year = max(1900, default_year - 25)
     year_options = list(range(default_year, min_year - 1, -1))
+    sticky = st.session_state.get("search_pubmed_filters_sticky")
+    if not isinstance(sticky, dict):
+        sticky = {}
 
     c1, c2 = st.columns(2)
     with c1:
-        selected_year = st.selectbox("Year", options=year_options, index=0, key="search_pubmed_year")
+        sticky_year = sticky.get("year")
+        year_default = int(sticky_year) if isinstance(sticky_year, int) and sticky_year in year_options else int(default_year)
+        selected_year = st.selectbox(
+            "Year",
+            options=year_options,
+            index=year_options.index(year_default),
+            key="search_pubmed_year",
+        )
     with c2:
+        sticky_month = sticky.get("month")
+        month_default = int(sticky_month) if isinstance(sticky_month, int) and 1 <= int(sticky_month) <= 12 else int(default_month)
         selected_month = st.selectbox(
             "Month",
             options=list(range(1, 13)),
-            index=max(0, min(11, default_month - 1)),
+            index=max(0, min(11, month_default - 1)),
             format_func=lambda m: calendar.month_name[int(m)],
             key="search_pubmed_month",
         )
@@ -146,19 +158,32 @@ def render() -> None:
 
     c3, c4 = st.columns(2)
     with c3:
+        journal_options = list(journal_query_by_label.keys())
+        sticky_journal = (sticky.get("journal") or "").strip()
+        journal_default_idx = journal_options.index(sticky_journal) if sticky_journal in journal_options else 0
         journal_label = st.selectbox(
             "Select Journal",
-            options=list(journal_query_by_label.keys()),
-            index=0,
+            options=journal_options,
+            index=journal_default_idx,
             key="search_pubmed_journal",
         )
     with c4:
+        study_type_options = list(study_type_queries.keys())
+        sticky_study_type = (sticky.get("study_type") or "").strip()
+        study_type_default_idx = study_type_options.index(sticky_study_type) if sticky_study_type in study_type_options else 0
         study_type_label = st.selectbox(
             "Study type filter",
-            options=list(study_type_queries.keys()),
-            index=0,
+            options=study_type_options,
+            index=study_type_default_idx,
             key="search_pubmed_study_type",
         )
+
+    st.session_state["search_pubmed_filters_sticky"] = {
+        "year": int(selected_year),
+        "month": int(selected_month),
+        "journal": (journal_label or "").strip(),
+        "study_type": (study_type_label or "").strip(),
+    }
 
     b_search, b_clear = st.columns(2)
     with b_search:
