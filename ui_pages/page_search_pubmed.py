@@ -1,6 +1,6 @@
 import calendar
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import requests
 import streamlit as st
@@ -48,6 +48,32 @@ def _parse_year_month_parts(year_month: str) -> Dict[str, str]:
     except Exception:
         pass
     return {"year": ym or "—", "month": "—"}
+
+
+def _parse_year_month_key(year_month: str) -> Optional[Tuple[int, int]]:
+    ym = (year_month or "").strip()
+    try:
+        parts = ym.split("-")
+        if len(parts) != 2:
+            return None
+        y = int(parts[0])
+        m = int(parts[1])
+        if y < 1900 or not (1 <= m <= 12):
+            return None
+        return (y, m)
+    except Exception:
+        return None
+
+
+def _clearable_on_date_for_month(year: int, month: int):
+    """
+    A month becomes clearable on the first day of the month after next.
+    Example: 2026-01 -> clearable on 2026-03-01 (after all of February).
+    """
+    total = (int(year) * 12) + (int(month) - 1) + 2
+    y2 = total // 12
+    m2 = (total % 12) + 1
+    return datetime(y2, m2, 1, tzinfo=timezone.utc).date()
 
 
 def _render_search_ledger() -> None:
@@ -206,7 +232,22 @@ def render() -> None:
 
     ym_key = (rng.get("year_month") or "").strip()
     is_verified = total_count <= int(SEARCH_FETCH_LIMIT)
-    is_cleared = bool(total_count > 0 and visible_count == 0 and is_verified)
+    base_cleared = bool(total_count > 0 and visible_count == 0 and is_verified)
+    is_time_clearable = True
+    clearable_on_s = ""
+    ym_parsed = _parse_year_month_key(ym_key)
+    if ym_parsed is not None:
+        yy, mm = ym_parsed
+        clearable_on = _clearable_on_date_for_month(yy, mm)
+        clearable_on_s = clearable_on.isoformat()
+        is_time_clearable = bool(today >= clearable_on)
+    is_cleared = bool(base_cleared and is_time_clearable)
+
+    if base_cleared and not is_time_clearable and clearable_on_s:
+        st.info(
+            f"This month cannot be marked cleared yet. "
+            f"It becomes clearable on {clearable_on_s} (UTC)."
+        )
     if total_count > 0:
         upsert_search_pubmed_ledger(
             year_month=ym_key,
