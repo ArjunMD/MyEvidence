@@ -134,14 +134,13 @@ def render() -> None:
         "NEJM": '"N Engl J Med"[jour]',
         "JAMA": '"JAMA"[jour]',
         "Lancet": '"Lancet"[jour]',
+        "BMJ": '"BMJ"[jour]',
+        "Nat Med": '"Nat Med"[jour]',
     }
     study_type_queries = {
         "Clinical Trial": ['"Clinical Trial"[Publication Type]'],
         "Meta analysis": ['"Meta-Analysis"[Publication Type]'],
-        "Both": [
-            '"Clinical Trial"[Publication Type]',
-            '"Meta-Analysis"[Publication Type]',
-        ],
+        "Systematic Review": ['"Systematic Review"[Publication Type]'],
     }
 
     c3, c4 = st.columns(2)
