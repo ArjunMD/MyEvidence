@@ -45,7 +45,6 @@ def render() -> None:
                 try:
                     with st.spinner("Extracting metadata (name/year/specialty)…"):
                         outm = extract_and_store_guideline_metadata_azure(gid_saved, pdf_bytes)
-                    st.caption("Reached: metadata extraction returned.")
                     if isinstance(outm, dict):
                         extracted_meta = {
                             "gid": gid_saved,
