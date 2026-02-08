@@ -136,6 +136,7 @@ def render() -> None:
         "Lancet": '"Lancet"[jour]',
         "BMJ": '"BMJ"[jour]',
         "Nat Med": '"Nat Med"[jour]',
+        "AIM": '"Ann Intern Med"[jour]',
     }
     study_type_queries = {
         "Clinical Trial": ['"Clinical Trial"[Publication Type]'],
