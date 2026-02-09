@@ -824,47 +824,6 @@ def rename_folder(folder_id: str, new_name: str) -> Dict[str, str]:
     }
 
 
-def clear_folder_items(folder_id: str) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    fid = (folder_id or "").strip()
-    if not fid:
-        raise ValueError("Folder ID is required.")
-
-    with _connect_db() as conn:
-        folder_row = conn.execute(
-            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_row:
-            raise ValueError("Folder not found.")
-
-        paper_count_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM folder_papers WHERE folder_id=?;",
-            (fid,),
-        ).fetchone()
-        guideline_count_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM folder_guidelines WHERE folder_id=?;",
-            (fid,),
-        ).fetchone()
-
-        papers_removed = int(paper_count_row["n"] or 0) if paper_count_row else 0
-        guidelines_removed = int(guideline_count_row["n"] or 0) if guideline_count_row else 0
-
-        conn.execute("DELETE FROM folder_papers WHERE folder_id=?;", (fid,))
-        conn.execute("DELETE FROM folder_guidelines WHERE folder_id=?;", (fid,))
-        conn.execute(
-            "UPDATE folders SET updated_at=? WHERE folder_id=?;",
-            (_utc_iso_z(), fid),
-        )
-
-    return {
-        "papers_removed": str(papers_removed),
-        "guidelines_removed": str(guidelines_removed),
-        "total_removed": str(papers_removed + guidelines_removed),
-    }
-
-
 def remove_items_from_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
     ensure_folders_schema()
 

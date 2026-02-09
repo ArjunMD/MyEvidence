@@ -550,17 +550,6 @@ def search_pubmed_pmids_page(
     return {"pmids": out, "total_count": int(total_count)}
 
 
-def search_pubmed_pmids(term: str, mindate: str, maxdate: str, retmax: int = 200) -> List[str]:
-    page = search_pubmed_pmids_page(
-        term=term,
-        mindate=mindate,
-        maxdate=maxdate,
-        retmax=retmax,
-        retstart=0,
-    )
-    return [str(p).strip() for p in (page.get("pmids") or []) if str(p).strip()]
-
-
 def _fetch_pubmed_titles_for_pmids(pmids: List[str]) -> Dict[str, str]:
     ids: List[str] = []
     seen = set()
@@ -627,24 +616,6 @@ def search_pubmed_by_date_filters_page(
     titles = _fetch_pubmed_titles_for_pmids(pmids)
     rows = [{"pmid": p, "title": titles.get(p, "").strip()} for p in pmids]
     return {"rows": rows, "total_count": int(page.get("total_count") or 0)}
-
-
-def search_pubmed_by_date_filters(
-    start_date: str,
-    end_date: str,
-    journal_term: str,
-    publication_type_terms: List[str],
-    retmax: int = 200,
-) -> List[Dict[str, str]]:
-    page = search_pubmed_by_date_filters_page(
-        start_date=start_date,
-        end_date=end_date,
-        journal_term=journal_term,
-        publication_type_terms=publication_type_terms,
-        retmax=retmax,
-        retstart=0,
-    )
-    return [r for r in (page.get("rows") or []) if isinstance(r, dict)]
 
 
 # ---------------- OpenAI helpers ----------------
