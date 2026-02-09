@@ -2,6 +2,7 @@ import calendar
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
+import pandas as pd
 import requests
 import streamlit as st
 
@@ -82,29 +83,107 @@ def _is_year_month_clearable(year_month: str, today) -> bool:
     return bool(today >= _clearable_on_date_for_month(yy, mm))
 
 
+def _safe_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
 def _render_search_ledger() -> None:
-    st.markdown("##### Cleared Ledger")
+    st.markdown("##### Ledger")
     st.caption("Entries are eligible to clear 30 days after month-end.")
     today = datetime.now(timezone.utc).date()
-    rows = list_search_pubmed_ledger(limit=100)
-    cleared_rows = [
-        r
-        for r in rows
-        if (r.get("is_cleared") or "0") == "1"
-        and _is_year_month_clearable((r.get("year_month") or "").strip(), today=today)
-    ]
-    if not cleared_rows:
-        st.caption("No cleared entries yet.")
+    rows = list_search_pubmed_ledger(limit=300)
+    if not rows:
+        st.caption("No ledger entries yet.")
         return
 
-    for r in cleared_rows:
-        ym = _parse_year_month_parts(r.get("year_month") or "")
-        journal = (r.get("journal_label") or "").strip() or "—"
-        study_type = (r.get("study_type_label") or "").strip() or "—"
-        year = (ym.get("year") or "").strip() or "—"
-        month = (ym.get("month") or "").strip() or "—"
+    table_rows: List[Dict[str, object]] = []
+    for r in rows:
+        ym_raw = (r.get("year_month") or "").strip()
+        ym_parts = _parse_year_month_parts(ym_raw)
+        ym_key = _parse_year_month_key(ym_raw)
+        clearable = _is_year_month_clearable(ym_raw, today=today)
 
-        st.markdown(f"- {journal} · {study_type} · {year} · {month}")
+        try:
+            total_matches = int(r.get("total_matches") or 0)
+        except Exception:
+            total_matches = 0
+        try:
+            visible_matches = int(r.get("visible_matches") or 0)
+        except Exception:
+            visible_matches = 0
+        is_cleared = (r.get("is_cleared") or "0") == "1"
+        is_verified = (r.get("is_verified") or "0") == "1"
+
+        if is_cleared and clearable:
+            status = "Cleared"
+            status_rank = 2
+        elif not is_verified:
+            status = "Unverified"
+            status_rank = 3
+        elif not clearable:
+            status = "Not clearable yet"
+            status_rank = 0
+        elif visible_matches > 0:
+            status = "Not cleared"
+            status_rank = 1
+        else:
+            status = "Ready to clear"
+            status_rank = 1
+
+        if ym_key is not None:
+            ym_sort = int(ym_key[0]) * 100 + int(ym_key[1])
+        else:
+            ym_sort = -1
+
+        year = (ym_parts.get("year") or "").strip()
+        month = (ym_parts.get("month") or "").strip()
+        if month and month != "—" and year and year != "—":
+            month_label = f"{month} {year}"
+        else:
+            month_label = ym_raw or "—"
+
+        table_rows.append(
+            {
+                "Journal": (r.get("journal_label") or "").strip() or "—",
+                "Study type": (r.get("study_type_label") or "").strip() or "—",
+                "Month": month_label,
+                "Status": status,
+                "Visible / Total": f"{visible_matches}/{total_matches}",
+                "_status_rank": status_rank,
+                "_ym_sort": ym_sort,
+            }
+        )
+
+    table_rows = sorted(
+        table_rows,
+        key=lambda x: (
+            _safe_int(x.get("_status_rank"), 99),
+            -_safe_int(x.get("_ym_sort"), -1),
+            str(x.get("Journal") or "").lower(),
+            str(x.get("Study type") or "").lower(),
+        ),
+    )
+
+    show_all = st.toggle("Show all ledger rows", value=False, key="search_pubmed_ledger_show_all")
+    if show_all:
+        display_rows = table_rows
+    else:
+        display_rows = [
+            r for r in table_rows if (r.get("Status") or "") in ("Not cleared", "Ready to clear", "Unverified")
+        ]
+
+    if not display_rows:
+        st.caption("No not-cleared entries. Enable `Show all ledger rows` to view history.")
+        return
+
+    cols = ["Journal", "Study type", "Month", "Status", "Visible / Total"]
+    df = pd.DataFrame(display_rows)
+    if not df.empty:
+        df = df[cols]
+    st.dataframe(df, hide_index=True, width='stretch')
 
 
 def render() -> None:
