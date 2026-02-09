@@ -1581,7 +1581,7 @@ def gpt_extract_authors_conclusions(
         "Extract the authors' conclusion statement from a PubMed abstract.\n"
         "Output MUST be plain text only (no bullets, no labels, no quotes), ideally 1–2 sentences.\n"
         "Be as close to verbatim as possible from the abstract text (prefer the Conclusions sentence if present).\n"
-        "Do NOT include any numbers (no digits), and avoid statistics.\n"
+        "It is unlikely that the author's conclusions contain actual numbers, those are better in the results section.\n"
         "Do NOT repeat patient count, study design tags, patient details, or intervention/comparison specifics.\n"
         "If no clear conclusion statement exists, return an empty string."
     )
