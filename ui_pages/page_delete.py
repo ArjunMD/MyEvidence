@@ -16,7 +16,6 @@ from db import (
 
 def render() -> None:
     st.title("🗑️ Delete")
-    st.caption("Permanently remove saved papers or guidelines + extracted content. This cannot be undone.")
 
     tab_papers, tab_guidelines = st.tabs(["Papers", "Guidelines"])
 

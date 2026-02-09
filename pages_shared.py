@@ -336,10 +336,7 @@ def gpt_generate_meta_combined(
         )
     else:
         instructions_lines.append(
-            "You are helping a clinician synthesize multiple studies and guidelines that were saved for review."
-        )
-        instructions_lines.append(
-            "Write ONE paragraph of high-yield interpretive thoughts across the set."
+            "Make up a nursery rhyme."
         )
 
     instructions_lines.extend(

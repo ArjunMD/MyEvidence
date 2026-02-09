@@ -10,7 +10,7 @@ For clinicians who love Pubmed, but hate having 37 tabs open and trying to track
 
 ## Pages
 - **Pubmed --> Abstract**: Enter a PMID and click fetch. PICO information is extracted and normalized from the abstract. Number of patients, author's conclusion, and specialty is also extracted. You can change anything in free-text at this time, but if you want to edit later, you have to delete the abstract from the database and re-fetch it. Make sure to add the abstract to your database if you want.
-- **Guidelines (PDF Upload)**: Upload a PDF from your computer (Guidelines are usually free). Title, year, and specialty are extracted. Recommendations are extracted and sorted into pre-specified categories. Repeats are searched for and placed at the end. You can edit the resulting display but this is risky if you change the formatting. You can do more in the DB Search page. 
+- **Guidelines (PDF Upload)**: Upload a PDF from your computer (Guidelines are usually free). Title, year, and specialty are extracted. Recommendations are extracted and sorted into pre-specified categories. Repeats are searched for and placed at the end. You can edit the resulting display but this is risky because you can accidentally change the formatting. 
 - **DB Search**: Search for previously added abstracts and guidelines, which are displayed in a normalized and clean way. For guidelines, specific recommendations can be deleted from here as well.
 - **DB Browse**: Browse by year or specialty. Title, journal, number of patients, and author's conclusion are easily visible.
 - **Generate meta**: Select an evidence base and then ask AI a focused question. You can add evidence to folders so for future questions, selecting an evidence base can be quicker. 

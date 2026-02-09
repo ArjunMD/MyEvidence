@@ -780,6 +780,181 @@ def get_folder_item_ids(folder_id: str) -> Dict[str, List[str]]:
     }
 
 
+def rename_folder(folder_id: str, new_name: str) -> Dict[str, str]:
+    ensure_folders_schema()
+
+    fid = (folder_id or "").strip()
+    if not fid:
+        raise ValueError("Folder ID is required.")
+
+    name = re.sub(r"\s+", " ", (new_name or "").strip())
+    if not name:
+        raise ValueError("Folder name cannot be empty.")
+
+    with _connect_db() as conn:
+        folder_row = conn.execute(
+            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
+            (fid,),
+        ).fetchone()
+        if not folder_row:
+            raise ValueError("Folder not found.")
+
+        duplicate_row = conn.execute(
+            """
+            SELECT 1
+            FROM folders
+            WHERE name = ? COLLATE NOCASE AND folder_id <> ?
+            LIMIT 1;
+            """,
+            (name, fid),
+        ).fetchone()
+        if duplicate_row:
+            raise ValueError("Folder name already exists.")
+
+        now = _utc_iso_z()
+        conn.execute(
+            "UPDATE folders SET name=?, updated_at=? WHERE folder_id=?;",
+            (name, now, fid),
+        )
+
+    return {
+        "folder_id": fid,
+        "name": name,
+        "updated_at": now,
+    }
+
+
+def clear_folder_items(folder_id: str) -> Dict[str, str]:
+    ensure_folders_schema()
+
+    fid = (folder_id or "").strip()
+    if not fid:
+        raise ValueError("Folder ID is required.")
+
+    with _connect_db() as conn:
+        folder_row = conn.execute(
+            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
+            (fid,),
+        ).fetchone()
+        if not folder_row:
+            raise ValueError("Folder not found.")
+
+        paper_count_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_papers WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+        guideline_count_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_guidelines WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+
+        papers_removed = int(paper_count_row["n"] or 0) if paper_count_row else 0
+        guidelines_removed = int(guideline_count_row["n"] or 0) if guideline_count_row else 0
+
+        conn.execute("DELETE FROM folder_papers WHERE folder_id=?;", (fid,))
+        conn.execute("DELETE FROM folder_guidelines WHERE folder_id=?;", (fid,))
+        conn.execute(
+            "UPDATE folders SET updated_at=? WHERE folder_id=?;",
+            (_utc_iso_z(), fid),
+        )
+
+    return {
+        "papers_removed": str(papers_removed),
+        "guidelines_removed": str(guidelines_removed),
+        "total_removed": str(papers_removed + guidelines_removed),
+    }
+
+
+def remove_items_from_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
+    ensure_folders_schema()
+
+    fid = (folder_id or "").strip()
+    if not fid:
+        raise ValueError("Folder ID is required.")
+
+    uniq_pmids = _dedupe_nonempty(pmids)
+    uniq_gids = _dedupe_nonempty(guideline_ids)
+    papers_removed = 0
+    guidelines_removed = 0
+
+    with _connect_db() as conn:
+        folder_row = conn.execute(
+            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
+            (fid,),
+        ).fetchone()
+        if not folder_row:
+            raise ValueError("Folder not found.")
+
+        for pmid in uniq_pmids:
+            cur = conn.execute(
+                "DELETE FROM folder_papers WHERE folder_id=? AND pmid=?;",
+                (fid, pmid),
+            )
+            papers_removed += int(cur.rowcount or 0)
+
+        for gid in uniq_gids:
+            cur = conn.execute(
+                "DELETE FROM folder_guidelines WHERE folder_id=? AND guideline_id=?;",
+                (fid, gid),
+            )
+            guidelines_removed += int(cur.rowcount or 0)
+
+        if papers_removed > 0 or guidelines_removed > 0:
+            conn.execute(
+                "UPDATE folders SET updated_at=? WHERE folder_id=?;",
+                (_utc_iso_z(), fid),
+            )
+
+    return {
+        "papers_selected": str(len(uniq_pmids)),
+        "guidelines_selected": str(len(uniq_gids)),
+        "papers_removed": str(papers_removed),
+        "guidelines_removed": str(guidelines_removed),
+        "total_removed": str(papers_removed + guidelines_removed),
+    }
+
+
+def delete_folder(folder_id: str) -> Dict[str, str]:
+    ensure_folders_schema()
+
+    fid = (folder_id or "").strip()
+    if not fid:
+        raise ValueError("Folder ID is required.")
+
+    with _connect_db() as conn:
+        folder_row = conn.execute(
+            "SELECT name FROM folders WHERE folder_id=? LIMIT 1;",
+            (fid,),
+        ).fetchone()
+        if not folder_row:
+            raise ValueError("Folder not found.")
+
+        name = (folder_row["name"] or "").strip()
+        paper_count_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_papers WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+        guideline_count_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_guidelines WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+
+        papers_removed = int(paper_count_row["n"] or 0) if paper_count_row else 0
+        guidelines_removed = int(guideline_count_row["n"] or 0) if guideline_count_row else 0
+
+        conn.execute("DELETE FROM folder_papers WHERE folder_id=?;", (fid,))
+        conn.execute("DELETE FROM folder_guidelines WHERE folder_id=?;", (fid,))
+        conn.execute("DELETE FROM folders WHERE folder_id=?;", (fid,))
+
+    return {
+        "folder_id": fid,
+        "name": name,
+        "papers_removed": str(papers_removed),
+        "guidelines_removed": str(guidelines_removed),
+        "total_removed": str(papers_removed + guidelines_removed),
+    }
+
+
 # ---------------- Guidelines storage + schema ----------------
 
 def _sha256_bytes(b: bytes) -> str:
