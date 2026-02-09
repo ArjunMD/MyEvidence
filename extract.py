@@ -799,6 +799,60 @@ def _extract_bracket_path(source_snippet: str) -> str:
     return (m.group(1) or "").strip()
 
 
+_GUIDELINE_PSEUDO_ATTR_START_RE = re.compile(
+    r"(?i)^\s*(?:we\s+)?(?:recommend|suggest|consider|avoid|do\s+not|don't|should)\b"
+)
+_GUIDELINE_GRADE_SIGNAL_RE = re.compile(
+    r"(?i)\b("
+    r"class\s*(?:[ivx]+|\d+[a-z]?)|"
+    r"level(?:\s+of\s+evidence)?\s*[a-d](?:-[a-z]+)?|"
+    r"loe\s*[a-d](?:-[a-z]+)?|"
+    r"grade\s*(?:[a-d]|\d+[a-z]?)|"
+    r"(?:strong|weak|conditional)\s+recommendation|"
+    r"good\s+practice\s+statement|"
+    r"(?:very\s+low|low|moderate|high)\s+(?:certainty|quality)"
+    r")\b"
+)
+
+
+def _normalize_guideline_attr_text(raw: str) -> str:
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if s.startswith("(") and s.endswith(")") and len(s) >= 3:
+        s = s[1:-1].strip()
+    s = re.sub(r"\s+", " ", s).strip(" ;,.-")
+    return s
+
+
+def _sanitize_guideline_attr_value(raw: str) -> str:
+    s = _normalize_guideline_attr_text(raw)
+    if not s:
+        return ""
+    low = s.lower()
+    if _GUIDELINE_PSEUDO_ATTR_START_RE.search(low) and not _GUIDELINE_GRADE_SIGNAL_RE.search(low):
+        return ""
+    return s
+
+
+def _attr_value_present_in_reco_text(reco_text: str, attr_value: str) -> bool:
+    txt = (reco_text or "").strip().lower()
+    val = _normalize_guideline_attr_text(attr_value).lower()
+    if not txt or not val:
+        return False
+
+    txt_norm = re.sub(r"[^a-z0-9]+", "", txt)
+    val_norm = re.sub(r"[^a-z0-9]+", "", val)
+    if len(val_norm) >= 4 and val_norm in txt_norm:
+        return True
+
+    toks = [t for t in re.findall(r"[a-z0-9]+", val) if len(t) >= 3]
+    if len(toks) >= 2 and all(re.search(rf"\b{re.escape(t)}\b", txt) for t in toks):
+        return True
+
+    return False
+
+
 def _chunk_recs_for_classification(items: List[Dict], max_chars: int = 14000, max_items: int = 45) -> List[List[Dict]]:
     """
     Chunk items so each OpenAI call stays bounded.
@@ -1234,13 +1288,15 @@ def gpt_generate_guideline_recommendations_display(
         if not txt:
             continue
         ii += 1
+        strength = _sanitize_guideline_attr_value(r.get("strength_raw") or "")
+        evidence = _sanitize_guideline_attr_value(r.get("evidence_raw") or "")
         enriched.append(
             {
                 "i": ii,
                 "section": _safe_section_label(i_to_section.get(ii, "Other")),
                 "text": txt,
-                "strength": (r.get("strength_raw") or "").strip(),
-                "evidence": (r.get("evidence_raw") or "").strip(),
+                "strength": strength,
+                "evidence": evidence,
                 "path": _extract_bracket_path(r.get("source_snippet") or ""),
             }
         )
@@ -1262,9 +1318,9 @@ def gpt_generate_guideline_recommendations_display(
         md_lines.append("")
         for e in grouped.get(sec, []):
             extras: List[str] = []
-            if e["strength"]:
+            if e["strength"] and not _attr_value_present_in_reco_text(e["text"], e["strength"]):
                 extras.append(f"Strength: {e['strength']}")
-            if e["evidence"]:
+            if e["evidence"] and not _attr_value_present_in_reco_text(e["text"], e["evidence"]):
                 extras.append(f"Evidence: {e['evidence']}")
             extra_txt = f" ({'; '.join(extras)})" if extras else ""
             md_lines.append(f"- **Rec {e['i']}.** {e['text']}{extra_txt}")
@@ -1921,7 +1977,10 @@ Rules:
 - Use ONLY what is explicitly present in the section. Never infer.
 - If no formal recommendation is present, return {{ "items": [] }}.
 - recommendation_text: include the full actionable directive sentence(s). Do not truncate clauses.
-- strength_raw / evidence_raw: include only if explicitly stated; else empty string.
+- strength_raw / evidence_raw: include only if explicitly stated AND clearly tied to that exact recommendation (same sentence, same bullet/numbered item, or immediate adjacent label).
+- If strength/evidence appears only as a section/table-wide label or the mapping is ambiguous, leave it empty.
+- Never copy a strength/evidence label from one recommendation to a different recommendation.
+- Do NOT use directive wording (e.g., "we recommend", "we suggest") as strength/evidence labels.
 - source_snippet: verbatim excerpt <= 240 chars that supports the recommendation (include grade markers if present).
 - Strings only; never null. No extra keys.
 
@@ -1967,6 +2026,31 @@ Strictness mode: '{strictness}'
     if not isinstance(items, list):
         return []
 
+    def _strength_evidence_clearly_associated(source_snippet: str, strength_raw: str, evidence_raw: str) -> bool:
+        strength = (strength_raw or "").strip()
+        evidence = (evidence_raw or "").strip()
+        if not strength and not evidence:
+            return True
+
+        snip = re.sub(r"\s+", " ", (source_snippet or "").strip().lower())
+        if not snip:
+            return False
+
+        for raw in [strength, evidence]:
+            piece = (raw or "").strip()
+            if not piece:
+                continue
+
+            pnorm = re.sub(r"\s+", " ", piece.lower())
+            if pnorm and pnorm in snip:
+                continue
+
+            toks = [t for t in re.findall(r"[a-z0-9]+", pnorm) if len(t) >= 2]
+            if toks and not any(t in snip for t in toks):
+                return False
+
+        return True
+
     out: List[Dict[str, str]] = []
     for it in items:
         if not isinstance(it, dict):
@@ -1974,12 +2058,20 @@ Strictness mode: '{strictness}'
         rec = (it.get("recommendation_text") or "").strip()
         if not rec:
             continue
+        strength = _sanitize_guideline_attr_value(it.get("strength_raw") or "")
+        evidence = _sanitize_guideline_attr_value(it.get("evidence_raw") or "")
+        snippet = (it.get("source_snippet") or "").strip()
+
+        if not _strength_evidence_clearly_associated(snippet, strength, evidence):
+            strength = ""
+            evidence = ""
+
         out.append(
             {
                 "recommendation_text": rec,
-                "strength_raw": (it.get("strength_raw") or "").strip(),
-                "evidence_raw": (it.get("evidence_raw") or "").strip(),
-                "source_snippet": (it.get("source_snippet") or "").strip(),
+                "strength_raw": strength,
+                "evidence_raw": evidence,
+                "source_snippet": snippet,
             }
         )
     return out

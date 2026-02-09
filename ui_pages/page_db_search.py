@@ -1,3 +1,5 @@
+import re
+import html
 from typing import Dict, List, Optional
 
 import requests
@@ -22,6 +24,42 @@ from pages_shared import (
     _render_plain_text,
     _tags_to_md,
 )
+
+
+_GUIDELINE_ATTR_SEGMENT_RE = re.compile(
+    r"(?P<label>\b(?:Strength|Evidence)\b\s*:\s*)(?P<value>[^;\)\n]+)",
+    flags=re.IGNORECASE,
+)
+_GUIDELINE_PSEUDO_ATTR_VALUE_RE = re.compile(
+    r"(?i)^\s*(?:we\s+)?(?:recommend|suggest|consider|avoid|do\s+not|don't|should)\b"
+)
+_GUIDELINE_ATTR_BLUE_HEX = "#2F8CFF"
+
+
+def _highlight_guideline_strength_evidence(md: str) -> str:
+    s = md or ""
+    if not s:
+        return ""
+
+    def _norm_alnum(raw: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", (raw or "").lower())
+
+    def _repl(m: re.Match) -> str:
+        label = (m.group("label") or "").strip()
+        value = (m.group("value") or "").strip()
+        if _GUIDELINE_PSEUDO_ATTR_VALUE_RE.search(value):
+            return m.group(0)
+
+        line_start = s.rfind("\n", 0, m.start()) + 1
+        prefix = s[line_start : m.start()]
+        value_norm = _norm_alnum(value)
+        if len(value_norm) >= 4 and value_norm in _norm_alnum(prefix):
+            return m.group(0)
+
+        txt = f"{label} {value}".strip()
+        return f"<span style='color: {_GUIDELINE_ATTR_BLUE_HEX};'>{html.escape(txt)}</span>"
+
+    return _GUIDELINE_ATTR_SEGMENT_RE.sub(_repl, s)
 
 
 def render() -> None:
@@ -195,6 +233,7 @@ def render() -> None:
                     st.info("No matching recommendation numbers found.")
 
         disp = (get_guideline_recommendations_display(gid) or "").strip()
+        disp_colored = _highlight_guideline_strength_evidence(disp)
 
         c_l, c_r = st.columns([6, 1], gap="small")
         with c_r:
@@ -211,8 +250,8 @@ def render() -> None:
 
         if disp:
             if edit_mode:
-                st.markdown(_guideline_md_with_delete_links(disp, gid), unsafe_allow_html=True)
+                st.markdown(_guideline_md_with_delete_links(disp_colored, gid), unsafe_allow_html=True)
             else:
-                st.markdown(disp)
+                st.markdown(disp_colored, unsafe_allow_html=True)
         else:
             st.info("No clinician-friendly recommendations display saved for this guideline yet.")
