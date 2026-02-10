@@ -83,11 +83,217 @@ def _is_year_month_clearable(year_month: str, today) -> bool:
     return bool(today >= _clearable_on_date_for_month(yy, mm))
 
 
+def _is_future_year_month(year_month: str, today) -> bool:
+    ym = _parse_year_month_key(year_month)
+    if ym is None:
+        return False
+    return bool((int(ym[0]), int(ym[1])) > (int(today.year), int(today.month)))
+
+
+def _latest_clearable_year_month(today) -> Optional[Tuple[int, int]]:
+    """
+    Return the most recent (year, month) that is clearable under the 30-day rule.
+    """
+    yy = int(today.year)
+    mm = int(today.month)
+    for _ in range(0, 2400):
+        ym = f"{yy:04d}-{mm:02d}"
+        if _is_year_month_clearable(ym, today=today):
+            return (yy, mm)
+        if mm == 1:
+            yy -= 1
+            mm = 12
+        else:
+            mm -= 1
+    return None
+
+
 def _safe_int(value, default: int) -> int:
     try:
         return int(value)
     except Exception:
         return int(default)
+
+
+def _canonical_ledger_study_type(label: str) -> str:
+    s = " ".join((label or "").strip().lower().replace("-", " ").replace("_", " ").split())
+    if s in ("clinical trial", "clinical trials"):
+        return "clinical_trial"
+    if s in ("meta analysis", "meta analyses"):
+        return "meta_analysis"
+    if s in ("systematic review", "systematic reviews"):
+        return "systematic_review"
+    return ""
+
+
+def _merge_cleared_all_rows(table_rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    """
+    Rule priority:
+    For the same journal + month, if Clinical Trial + Meta analysis + Systematic Review
+    are all cleared, replace those rows with one cleared row labeled Study type = All.
+    """
+    required = {"clinical_trial", "meta_analysis", "systematic_review"}
+    grouped: Dict[Tuple[str, str], List[Tuple[int, Dict[str, object], str]]] = {}
+
+    for idx, row in enumerate(table_rows):
+        if (row.get("Status") or "") != "Cleared":
+            continue
+        canonical = _canonical_ledger_study_type(str(row.get("Study type") or ""))
+        if canonical not in required:
+            continue
+        journal_key = str(row.get("Journal") or "").strip().lower()
+        ym_key = str(row.get("_ym_raw") or "").strip()
+        grouped.setdefault((journal_key, ym_key), []).append((idx, row, canonical))
+
+    to_remove: set[int] = set()
+    merged_rows: List[Dict[str, object]] = []
+    for _, members in grouped.items():
+        present = {canonical for _, _, canonical in members}
+        if not required.issubset(present):
+            continue
+
+        picked: Dict[str, Tuple[int, Dict[str, object]]] = {}
+        for idx, row, canonical in members:
+            picked.setdefault(canonical, (idx, row))
+
+        chosen = [picked["clinical_trial"], picked["meta_analysis"], picked["systematic_review"]]
+        chosen_rows = [row for _, row in chosen]
+        to_remove.update(idx for idx, _ in chosen)
+
+        rep = chosen_rows[0]
+        visible_total = sum(_safe_int(r.get("_visible_matches"), 0) for r in chosen_rows)
+        match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in chosen_rows)
+        merged_rows.append(
+            {
+                "Journal": rep.get("Journal") or "—",
+                "Study type": "All",
+                "Month": rep.get("Month") or "—",
+                "Status": "Cleared",
+                "Visible / Total": f"{visible_total}/{match_total}",
+                "_status_rank": rep.get("_status_rank"),
+                "_ym_sort": rep.get("_ym_sort"),
+                "_ym_raw": rep.get("_ym_raw"),
+                "_visible_matches": visible_total,
+                "_total_matches": match_total,
+            }
+        )
+
+    if not merged_rows:
+        return table_rows
+
+    out: List[Dict[str, object]] = []
+    for idx, row in enumerate(table_rows):
+        if idx in to_remove:
+            continue
+        out.append(row)
+    out.extend(merged_rows)
+    return out
+
+
+def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], today) -> List[Dict[str, object]]:
+    """
+    Second rule:
+    For rows with Status=Cleared and Study type=All, merge consecutive months for the
+    same journal into one row. Month label becomes "First month to Last month",
+    or "First month to present" when the run ends at the latest clearable month.
+    """
+    groups: Dict[str, List[Tuple[int, Dict[str, object], int]]] = {}
+    last_clearable_ym = _latest_clearable_year_month(today=today)
+    for idx, row in enumerate(table_rows):
+        if (row.get("Status") or "") != "Cleared":
+            continue
+        if str(row.get("Study type") or "").strip().lower() != "all":
+            continue
+        ym = _parse_year_month_key(str(row.get("_ym_raw") or ""))
+        if ym is None:
+            continue
+        month_idx = int(ym[0]) * 12 + int(ym[1])
+        jkey = str(row.get("Journal") or "").strip().lower()
+        groups.setdefault(jkey, []).append((idx, row, month_idx))
+
+    to_remove: set[int] = set()
+    merged_rows: List[Dict[str, object]] = []
+
+    for _, items in groups.items():
+        if len(items) < 2:
+            continue
+        items_sorted = sorted(items, key=lambda x: x[2])  # oldest -> newest
+
+        run: List[Tuple[int, Dict[str, object], int]] = [items_sorted[0]]
+        for cur in items_sorted[1:]:
+            prev = run[-1]
+            if cur[2] == (prev[2] + 1):
+                run.append(cur)
+                continue
+
+            if len(run) >= 2:
+                run_rows = [r for _, r, _ in run]
+                first_row = run_rows[0]
+                last_row = run_rows[-1]
+                visible_total = sum(_safe_int(r.get("_visible_matches"), 0) for r in run_rows)
+                match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in run_rows)
+                last_ym = _parse_year_month_key(str(last_row.get("_ym_raw") or ""))
+                if last_clearable_ym is not None and last_ym == last_clearable_ym:
+                    month_label = f"{first_row.get('Month') or '—'} to present"
+                else:
+                    month_label = f"{first_row.get('Month') or '—'} to {last_row.get('Month') or '—'}"
+
+                merged_rows.append(
+                    {
+                        "Journal": last_row.get("Journal") or "—",
+                        "Study type": "All",
+                        "Month": month_label,
+                        "Status": "Cleared",
+                        "Visible / Total": f"{visible_total}/{match_total}",
+                        "_status_rank": last_row.get("_status_rank"),
+                        "_ym_sort": last_row.get("_ym_sort"),
+                        "_ym_raw": last_row.get("_ym_raw"),
+                        "_visible_matches": visible_total,
+                        "_total_matches": match_total,
+                    }
+                )
+                to_remove.update(idx for idx, _, _ in run)
+
+            run = [cur]
+
+        if len(run) >= 2:
+            run_rows = [r for _, r, _ in run]
+            first_row = run_rows[0]
+            last_row = run_rows[-1]
+            visible_total = sum(_safe_int(r.get("_visible_matches"), 0) for r in run_rows)
+            match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in run_rows)
+            last_ym = _parse_year_month_key(str(last_row.get("_ym_raw") or ""))
+            if last_clearable_ym is not None and last_ym == last_clearable_ym:
+                month_label = f"{first_row.get('Month') or '—'} to present"
+            else:
+                month_label = f"{first_row.get('Month') or '—'} to {last_row.get('Month') or '—'}"
+
+            merged_rows.append(
+                {
+                    "Journal": last_row.get("Journal") or "—",
+                    "Study type": "All",
+                    "Month": month_label,
+                    "Status": "Cleared",
+                    "Visible / Total": f"{visible_total}/{match_total}",
+                    "_status_rank": last_row.get("_status_rank"),
+                    "_ym_sort": last_row.get("_ym_sort"),
+                    "_ym_raw": last_row.get("_ym_raw"),
+                    "_visible_matches": visible_total,
+                    "_total_matches": match_total,
+                }
+            )
+            to_remove.update(idx for idx, _, _ in run)
+
+    if not merged_rows:
+        return table_rows
+
+    out: List[Dict[str, object]] = []
+    for idx, row in enumerate(table_rows):
+        if idx in to_remove:
+            continue
+        out.append(row)
+    out.extend(merged_rows)
+    return out
 
 
 def _render_search_ledger() -> None:
@@ -102,6 +308,8 @@ def _render_search_ledger() -> None:
     table_rows: List[Dict[str, object]] = []
     for r in rows:
         ym_raw = (r.get("year_month") or "").strip()
+        if _is_future_year_month(ym_raw, today=today):
+            continue
         ym_parts = _parse_year_month_parts(ym_raw)
         ym_key = _parse_year_month_key(ym_raw)
         clearable = _is_year_month_clearable(ym_raw, today=today)
@@ -152,10 +360,16 @@ def _render_search_ledger() -> None:
                 "Month": month_label,
                 "Status": status,
                 "Visible / Total": f"{visible_matches}/{total_matches}",
+                "_ym_raw": ym_raw,
+                "_total_matches": total_matches,
+                "_visible_matches": visible_matches,
                 "_status_rank": status_rank,
                 "_ym_sort": ym_sort,
             }
         )
+
+    table_rows = _merge_cleared_all_rows(table_rows)
+    table_rows = _merge_consecutive_cleared_all_rows(table_rows, today=today)
 
     table_rows = sorted(
         table_rows,
@@ -179,7 +393,7 @@ def _render_search_ledger() -> None:
         st.caption("No not-cleared entries. Enable `Show all ledger rows` to view history.")
         return
 
-    cols = ["Journal", "Study type", "Month", "Status", "Visible / Total"]
+    cols = ["Journal", "Study type", "Month", "Status"]
     df = pd.DataFrame(display_rows)
     if not df.empty:
         df = df[cols]
@@ -284,38 +498,43 @@ def render() -> None:
             st.error("Invalid year/month selection.")
             st.stop()
 
-        start_s = start_date.strftime("%Y/%m/%d")
-        end_s = end_date.strftime("%Y/%m/%d")
-        journal_term = journal_query_by_label.get(journal_label, "")
-        pub_terms = study_type_queries.get(study_type_label, [])
-        try:
-            with st.spinner("Searching PubMed…"):
-                page = _run_search_page(
-                    start_date=start_s,
-                    end_date=end_s,
-                    journal_term=journal_term,
-                    publication_type_terms=pub_terms,
-                    retmax=int(SEARCH_FETCH_LIMIT),
-                    retstart=0,
-                )
-            rows = [r for r in (page.get("rows") or []) if isinstance(r, dict)]
-            total_count = int(page.get("total_count") or 0)
-            st.session_state["search_pubmed_rows"] = rows
-            st.session_state["search_pubmed_total_count"] = total_count
-            st.session_state["search_pubmed_range"] = {
-                "start": start_s,
-                "end": end_s,
-                "year_month": f"{int(selected_year)}-{int(selected_month):02d}",
-                "year_month_label": f"{calendar.month_name[int(selected_month)]} {int(selected_year)}",
-            }
-            st.session_state["search_pubmed_filters"] = {
-                "journal": journal_label,
-                "study_type": study_type_label,
-            }
-        except requests.HTTPError as e:
-            st.error(f"PubMed search failed: {e}")
-        except Exception as e:
-            st.error(f"Unexpected search error: {e}")
+        if (int(selected_year), int(selected_month)) > (int(today.year), int(today.month)):
+            for k in ["search_pubmed_rows", "search_pubmed_total_count", "search_pubmed_range", "search_pubmed_filters"]:
+                st.session_state.pop(k, None)
+            st.error("Future months are not allowed in Search PubMed. Please choose the current month or earlier.")
+        else:
+            start_s = start_date.strftime("%Y/%m/%d")
+            end_s = end_date.strftime("%Y/%m/%d")
+            journal_term = journal_query_by_label.get(journal_label, "")
+            pub_terms = study_type_queries.get(study_type_label, [])
+            try:
+                with st.spinner("Searching PubMed…"):
+                    page = _run_search_page(
+                        start_date=start_s,
+                        end_date=end_s,
+                        journal_term=journal_term,
+                        publication_type_terms=pub_terms,
+                        retmax=int(SEARCH_FETCH_LIMIT),
+                        retstart=0,
+                    )
+                rows = [r for r in (page.get("rows") or []) if isinstance(r, dict)]
+                total_count = int(page.get("total_count") or 0)
+                st.session_state["search_pubmed_rows"] = rows
+                st.session_state["search_pubmed_total_count"] = total_count
+                st.session_state["search_pubmed_range"] = {
+                    "start": start_s,
+                    "end": end_s,
+                    "year_month": f"{int(selected_year)}-{int(selected_month):02d}",
+                    "year_month_label": f"{calendar.month_name[int(selected_month)]} {int(selected_year)}",
+                }
+                st.session_state["search_pubmed_filters"] = {
+                    "journal": journal_label,
+                    "study_type": study_type_label,
+                }
+            except requests.HTTPError as e:
+                st.error(f"PubMed search failed: {e}")
+            except Exception as e:
+                st.error(f"Unexpected search error: {e}")
 
     if "search_pubmed_rows" not in st.session_state:
         st.info("Choose a date range and click Search.")
@@ -351,16 +570,17 @@ def render() -> None:
     is_verified = total_count <= int(SEARCH_FETCH_LIMIT)
     is_time_clearable = _is_year_month_clearable(ym_key, today=today)
     is_cleared = bool(visible_count == 0 and is_verified and is_time_clearable)
-    upsert_search_pubmed_ledger(
-        year_month=ym_key,
-        journal_label=journal_label,
-        study_type_label=study_type_label,
-        total_matches=total_count,
-        visible_matches=visible_count,
-        hidden_matches=hidden_count,
-        is_cleared=is_cleared,
-        is_verified=is_verified,
-    )
+    if not _is_future_year_month(ym_key, today=today):
+        upsert_search_pubmed_ledger(
+            year_month=ym_key,
+            journal_label=journal_label,
+            study_type_label=study_type_label,
+            total_matches=total_count,
+            visible_matches=visible_count,
+            hidden_matches=hidden_count,
+            is_cleared=is_cleared,
+            is_verified=is_verified,
+        )
 
     if total_count > int(SEARCH_FETCH_LIMIT):
         st.warning(
