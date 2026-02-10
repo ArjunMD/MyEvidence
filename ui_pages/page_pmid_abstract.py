@@ -329,7 +329,7 @@ def render() -> None:
             st.text_area(
                 "Author's conclusions",
                 key="authors_conclusions_input",
-                placeholder="Near-verbatim conclusion statement (no numbers).",
+                placeholder="Near-verbatim conclusion statement.",
                 height=110,
             )
 

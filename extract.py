@@ -1391,16 +1391,6 @@ def _normalize_bullets(raw: str) -> str:
     return "\n".join(final).strip()
 
 
-def _strip_digits(text: str) -> str:
-    s = (text or "").strip()
-    if not s:
-        return ""
-    s = re.sub(r"\d", "", s)
-    s = re.sub(r"\s{2,}", " ", s).strip()
-    s = re.sub(r"\s+([,.;:])", r"\1", s)
-    return s.strip()
-
-
 # ---------------- OpenAI extractors ----------------
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
@@ -1637,7 +1627,7 @@ def gpt_extract_authors_conclusions(
         "Extract the authors' conclusion statement from a PubMed abstract.\n"
         "Output MUST be plain text only (no bullets, no labels, no quotes), ideally 1–2 sentences.\n"
         "Be as close to verbatim as possible from the abstract text (prefer the Conclusions sentence if present).\n"
-        "It is unlikely that the author's conclusions contain actual numbers, those are better in the results section.\n"
+        "Preserve any numeric values exactly as written when they are part of the conclusion statement.\n"
         "Do NOT repeat patient count, study design tags, patient details, or intervention/comparison specifics.\n"
         "If no clear conclusion statement exists, return an empty string."
     )
@@ -1671,7 +1661,7 @@ def gpt_extract_authors_conclusions(
     )
     r.raise_for_status()
 
-    return _strip_digits((_extract_output_text(r.json()) or "").strip())
+    return (_extract_output_text(r.json()) or "").strip()
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
