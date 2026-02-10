@@ -381,16 +381,10 @@ def _render_search_ledger() -> None:
         ),
     )
 
-    show_all = st.toggle("Show all ledger rows", value=False, key="search_pubmed_ledger_show_all")
-    if show_all:
-        display_rows = table_rows
-    else:
-        display_rows = [
-            r for r in table_rows if (r.get("Status") or "") in ("Not cleared", "Ready to clear", "Unverified")
-        ]
+    display_rows = [r for r in table_rows if (r.get("Status") or "") != "Not cleared"]
 
     if not display_rows:
-        st.caption("No not-cleared entries. Enable `Show all ledger rows` to view history.")
+        st.caption("No ledger entries to display.")
         return
 
     cols = ["Journal", "Study type", "Month", "Status"]
