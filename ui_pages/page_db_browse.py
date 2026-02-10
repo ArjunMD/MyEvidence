@@ -3,7 +3,7 @@ from typing import Dict, List
 
 import streamlit as st
 
-from db import list_browse_guideline_items, list_browse_items
+from db import list_browse_guideline_items, list_browse_items, search_guidelines, search_records
 from pages_shared import BROWSE_MAX_ROWS, _browse_search_link, _split_specialties, _year_sort_key
 
 
@@ -27,7 +27,7 @@ def _browse_item_sort_key(item: Dict[str, str]) -> tuple:
 
 
 def render() -> None:
-    st.title("🗂️ Browse")
+    st.title("🗂️ Browse studies")
 
     by_specialty = st.toggle(
         "Browse by specialty",
@@ -39,6 +39,12 @@ def render() -> None:
         value=False,
         key="browse_guidelines_only",
     )
+    browse_q = st.text_input(
+        "Search",
+        placeholder='Filter this browse view by any field. Supports AND, OR, and "exact phrase"…',
+        key="db_browse_any",
+    )
+    st.caption('Example: `heart AND "reduced ejection fraction"` or `sepsis OR septic shock`')
 
     items: List[Dict[str, str]] = []
     if guidelines_only:
@@ -53,6 +59,47 @@ def render() -> None:
         else:
             st.info("No saved items yet.")
         st.stop()
+
+    q = (browse_q or "").strip()
+    if q:
+        if guidelines_only:
+            matched_guideline_rows = search_guidelines(limit=BROWSE_MAX_ROWS, q=q)
+            matched_gids = {
+                (r.get("guideline_id") or "").strip()
+                for r in (matched_guideline_rows or [])
+                if (r.get("guideline_id") or "").strip()
+            }
+            items = [
+                it
+                for it in items
+                if (it.get("type") or "").strip() == "guideline"
+                and (it.get("guideline_id") or "").strip() in matched_gids
+            ]
+        else:
+            matched_paper_rows = search_records(limit=BROWSE_MAX_ROWS, q=q)
+            matched_guideline_rows = search_guidelines(limit=BROWSE_MAX_ROWS, q=q)
+            matched_pmids = {
+                (r.get("pmid") or "").strip()
+                for r in (matched_paper_rows or [])
+                if (r.get("pmid") or "").strip()
+            }
+            matched_gids = {
+                (r.get("guideline_id") or "").strip()
+                for r in (matched_guideline_rows or [])
+                if (r.get("guideline_id") or "").strip()
+            }
+            items = [
+                it
+                for it in items
+                if (
+                    ((it.get("type") or "").strip() == "guideline" and (it.get("guideline_id") or "").strip() in matched_gids)
+                    or ((it.get("type") or "").strip() != "guideline" and (it.get("pmid") or "").strip() in matched_pmids)
+                )
+            ]
+
+        if not items:
+            st.info("No matches in current browse view.")
+            st.stop()
 
     if by_specialty:
         grouped: Dict[str, Dict[str, List[Dict[str, str]]]] = {}

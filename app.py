@@ -36,7 +36,7 @@ if _open_abs_pmid:
     st.session_state["pmid_input"] = _open_abs_pmid
     _clear_query_params()
 elif _open_pmid or _open_gid:
-    st.session_state["nav_page"] = "DB Search"
+    st.session_state["nav_page"] = "Single-study view"
     st.session_state["db_search_any"] = ""
 
     if _open_pmid:
@@ -53,13 +53,18 @@ elif _open_pmid or _open_gid:
 
     _clear_query_params()
 
+if st.session_state.get("nav_page") in ("DB Search", "View"):
+    st.session_state["nav_page"] = "Single-study view"
+if st.session_state.get("nav_page") == "DB Browse":
+    st.session_state["nav_page"] = "Browse studies"
+
 page = st.sidebar.radio(
     "Navigate",
     [
         "PMID → Abstract",
         "Guidelines (PDF Upload)",
-        "DB Search",
-        "DB Browse",
+        "Browse studies",
+        "Single-study view",
         "Generate meta",
         "Search PubMed",
         "Delete",
@@ -80,10 +85,10 @@ if page == "PMID → Abstract":
     render_pmid_abstract()
 elif page == "Guidelines (PDF Upload)":
     render_guidelines()
-elif page == "DB Search":
-    render_db_search()
-elif page == "DB Browse":
+elif page == "Browse studies":
     render_db_browse()
+elif page == "Single-study view":
+    render_db_search()
 elif page == "Generate meta":
     render_generate_meta()
 elif page == "Search PubMed":

@@ -6,7 +6,7 @@ import sqlite3
 import hashlib
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 DB_PATH = "data/papers.db"
 
@@ -336,13 +336,108 @@ def db_count_all() -> int:
 
     return papers + guidelines
 
+
+def _parse_search_query_groups(raw: str) -> List[List[str]]:
+    """
+    Parse a free-text query into OR-groups of AND-terms.
+    Supported syntax:
+    - AND / OR operators (case-insensitive)
+    - quoted phrases for exact substring terms
+    - implicit AND between adjacent terms
+    """
+    s = (raw or "").strip()
+    if not s:
+        return []
+
+    lex: List[Tuple[str, str]] = []
+    for m in re.finditer(r'"([^"]+)"|(\S+)', s):
+        phrase = m.group(1)
+        token = m.group(2)
+
+        if phrase is not None:
+            t = re.sub(r"\s+", " ", phrase).strip()
+            if t:
+                lex.append(("TERM", t))
+            continue
+
+        w = (token or "").strip()
+        if not w:
+            continue
+        if re.fullmatch(r"(?i)and|or", w):
+            lex.append(("OP", w.upper()))
+            continue
+
+        # Keep legacy behavior for unquoted text: split punctuation into terms.
+        parts = re.findall(r"[A-Za-z0-9]+", w)
+        for p in parts:
+            t = (p or "").strip()
+            if t:
+                lex.append(("TERM", t))
+
+    if not lex:
+        return []
+
+    groups: List[List[str]] = []
+    current: List[str] = []
+    pending_op = "AND"
+    for kind, val in lex:
+        if kind == "OP":
+            pending_op = val
+            continue
+
+        if not current:
+            current = [val]
+        elif pending_op == "OR":
+            groups.append(current)
+            current = [val]
+        else:
+            current.append(val)
+        pending_op = "AND"
+
+    if current:
+        groups.append(current)
+
+    cleaned: List[List[str]] = []
+    for g in groups:
+        seen = set()
+        out: List[str] = []
+        for raw_t in g:
+            t = (raw_t or "").strip()
+            if not t:
+                continue
+            key = t.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(t)
+        if out:
+            cleaned.append(out)
+    return cleaned
+
+
+def _build_search_where_sql(groups: List[List[str]], cols: List[str]) -> Tuple[str, List[str]]:
+    where_parts: List[str] = []
+    params: List[str] = []
+
+    for group in (groups or []):
+        and_parts: List[str] = []
+        for term in (group or []):
+            like = f"%{term}%"
+            ors = " OR ".join([f"{c} LIKE ?" for c in cols])
+            and_parts.append(f"({ors})")
+            params.extend([like] * len(cols))
+        if and_parts:
+            where_parts.append("(" + " AND ".join(and_parts) + ")")
+
+    return " OR ".join(where_parts), params
+
 def search_records(limit: int, q: str) -> List[Dict[str, str]]:
     raw = (q or "").strip()
     if not raw:
         return []
 
-    tokens = re.findall(r"[A-Za-z0-9]+", raw)
-    if not tokens:
+    groups = _parse_search_query_groups(raw)
+    if not groups:
         return []
 
     cols = [
@@ -360,15 +455,9 @@ def search_records(limit: int, q: str) -> List[Dict[str, str]]:
         "COALESCE(CAST(patient_n AS TEXT),'')",
     ]
 
-    where_parts: List[str] = []
-    params: List[str] = []
-    for tok in tokens:
-        like = f"%{tok}%"
-        ors = " OR ".join([f"{c} LIKE ?" for c in cols])
-        where_parts.append(f"({ors})")
-        params.extend([like] * len(cols))
-
-    where_sql = " AND ".join(where_parts)
+    where_sql, params = _build_search_where_sql(groups, cols)
+    if not where_sql:
+        return []
 
     with _connect_db() as conn:
         rows = conn.execute(
@@ -1197,8 +1286,8 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
     if not raw:
         return []
 
-    tokens = re.findall(r"[A-Za-z0-9]+", raw)
-    if not tokens:
+    groups = _parse_search_query_groups(raw)
+    if not groups:
         return []
 
     gcols = [
@@ -1209,15 +1298,9 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
         "COALESCE(g.recommendations_display_md,'')",
     ]
 
-    where_parts: List[str] = []
-    params: List[str] = []
-    for tok in tokens:
-        like = f"%{tok}%"
-        ors = " OR ".join([f"{c} LIKE ?" for c in gcols])
-        where_parts.append(f"({ors})")
-        params.extend([like] * len(gcols))
-
-    where_sql = " AND ".join(where_parts)
+    where_sql, params = _build_search_where_sql(groups, gcols)
+    if not where_sql:
+        return []
 
     with _connect_db() as conn:
         rows = conn.execute(

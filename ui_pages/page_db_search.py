@@ -63,7 +63,7 @@ def _highlight_guideline_strength_evidence(md: str) -> str:
 
 
 def render() -> None:
-    st.title("📚 Database")
+    st.title("📚 Single-study view")
 
     forced_selected: Optional[Dict[str, str]] = None
     open_pmid = (st.session_state.get("db_search_open_pmid") or "").strip()
@@ -76,9 +76,10 @@ def render() -> None:
 
     q = st.text_input(
         "Search",
-        placeholder="Search anything (title, abstract text, intervention, journal, etc)…",
+        placeholder='Search anything. Supports AND, OR, and "exact phrase"…',
         key="db_search_any",
     )
+    st.caption('Example: `heart AND "reduced ejection fraction"` or `sepsis OR septic shock`')
 
     if (q or "").strip():
         st.session_state.pop("db_search_open_pmid", None)
