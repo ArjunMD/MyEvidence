@@ -374,8 +374,8 @@ def _render_search_ledger() -> None:
     table_rows = sorted(
         table_rows,
         key=lambda x: (
-            _safe_int(x.get("_status_rank"), 99),
             -_safe_int(x.get("_ym_sort"), -1),
+            _safe_int(x.get("_status_rank"), 99),
             str(x.get("Journal") or "").lower(),
             str(x.get("Study type") or "").lower(),
         ),
