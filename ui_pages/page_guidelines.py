@@ -1,5 +1,3 @@
-from typing import Dict
-
 import streamlit as st
 
 from db import (
@@ -41,20 +39,11 @@ def render() -> None:
                     st.error("Save succeeded but returned no guideline_id.")
                     st.stop()
 
-                extracted_meta: Dict[str, str] = {}
                 try:
                     with st.spinner("Extracting metadata (name/year/specialty)…"):
-                        outm = extract_and_store_guideline_metadata_azure(gid_saved, pdf_bytes)
-                    if isinstance(outm, dict):
-                        extracted_meta = {
-                            "gid": gid_saved,
-                            "name": str(outm.get("guideline_name") or "").strip(),
-                            "year": str(outm.get("pub_year") or "").strip(),
-                            "spec": str(outm.get("specialty") or "").strip(),
-                        }
+                        extract_and_store_guideline_metadata_azure(gid_saved, pdf_bytes)
                 except Exception as e:
                     st.warning(f"Metadata extraction failed/skipped: {e}")
-                    extracted_meta = {}
 
                 n_recs = 0
                 disp_now = (get_guideline_recommendations_display(gid_saved) or "").strip()

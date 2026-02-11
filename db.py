@@ -101,6 +101,7 @@ def ensure_schema() -> None:
             ON search_pubmed_ledger(last_checked_at DESC);
             """
         )
+    ensure_evidence_cart_schema()
 
 
 def save_record(
@@ -559,6 +560,10 @@ def delete_record(pmid: str) -> None:
             conn.execute("DELETE FROM folder_papers WHERE pmid=?;", (pmid,))
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("DELETE FROM evidence_cart_items WHERE item_type='paper' AND item_id=?;", (pmid,))
+        except sqlite3.OperationalError:
+            pass
 
 
 def list_recent_records(limit: int) -> List[Dict[str, str]]:
@@ -629,378 +634,131 @@ def list_abstracts_for_history(limit: int) -> List[Dict[str, str]]:
     return out
 
 
-# ---------------- Folders (saved source groupings) ----------------
+# ---------------- Evidence cart ----------------
 
-def ensure_folders_schema() -> None:
+def ensure_evidence_cart_schema() -> None:
     with _connect_db() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS folders (
-                folder_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+            CREATE TABLE IF NOT EXISTS evidence_cart_items (
+                item_type TEXT NOT NULL CHECK(item_type IN ('paper','guideline')),
+                item_id TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (item_type, item_id)
             );
             """
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS folder_papers (
-                folder_id TEXT NOT NULL,
-                pmid TEXT NOT NULL,
-                added_at TEXT NOT NULL,
-                PRIMARY KEY (folder_id, pmid)
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS folder_guidelines (
-                folder_id TEXT NOT NULL,
-                guideline_id TEXT NOT NULL,
-                added_at TEXT NOT NULL,
-                PRIMARY KEY (folder_id, guideline_id)
-            );
+            CREATE INDEX IF NOT EXISTS idx_evidence_cart_added_at
+            ON evidence_cart_items(added_at DESC);
             """
         )
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_folder_papers_pmid ON folder_papers(pmid);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_folder_guidelines_gid ON folder_guidelines(guideline_id);")
 
-
-def list_folders(limit: int) -> List[Dict[str, str]]:
-    ensure_folders_schema()
+def get_evidence_cart_item_ids() -> Dict[str, List[str]]:
+    ensure_evidence_cart_schema()
     with _connect_db() as conn:
         rows = conn.execute(
             """
-            SELECT
-                f.folder_id,
-                f.name,
-                f.created_at,
-                f.updated_at,
-                (SELECT COUNT(*) FROM folder_papers fp WHERE fp.folder_id = f.folder_id) AS paper_count,
-                (SELECT COUNT(*) FROM folder_guidelines fg WHERE fg.folder_id = f.folder_id) AS guideline_count
-            FROM folders f
-            ORDER BY f.name COLLATE NOCASE ASC
-            LIMIT ?;
-            """,
-            (int(limit),),
+            SELECT item_type, item_id
+            FROM evidence_cart_items
+            ORDER BY added_at DESC, item_id ASC;
+            """
         ).fetchall()
 
-    out: List[Dict[str, str]] = []
+    pmids: List[str] = []
+    gids: List[str] = []
     for r in rows:
-        paper_count = int(r["paper_count"] or 0)
-        guideline_count = int(r["guideline_count"] or 0)
-        out.append(
-            {
-                "folder_id": (r["folder_id"] or "").strip(),
-                "name": (r["name"] or "").strip(),
-                "created_at": (r["created_at"] or "").strip(),
-                "updated_at": (r["updated_at"] or "").strip(),
-                "paper_count": str(paper_count),
-                "guideline_count": str(guideline_count),
-                "item_count": str(paper_count + guideline_count),
-            }
-        )
-    return out
+        item_type = (r["item_type"] or "").strip().lower()
+        item_id = (r["item_id"] or "").strip()
+        if not item_id:
+            continue
+        if item_type == "paper":
+            pmids.append(item_id)
+        elif item_type == "guideline":
+            gids.append(item_id)
+
+    return {"pmids": pmids, "guideline_ids": gids}
 
 
-def create_or_get_folder(folder_name: str) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    # Normalize whitespace so accidental spacing does not create duplicate names.
-    name = re.sub(r"\s+", " ", (folder_name or "").strip())
-    if not name:
-        raise ValueError("Folder name cannot be empty.")
-
-    with _connect_db() as conn:
-        existing = conn.execute(
-            """
-            SELECT folder_id, name, created_at, updated_at
-            FROM folders
-            WHERE name = ? COLLATE NOCASE
-            LIMIT 1;
-            """,
-            (name,),
-        ).fetchone()
-        if existing:
-            return {
-                "folder_id": (existing["folder_id"] or "").strip(),
-                "name": (existing["name"] or "").strip(),
-                "created_at": (existing["created_at"] or "").strip(),
-                "updated_at": (existing["updated_at"] or "").strip(),
-                "created": "0",
-            }
-
-        folder_id = uuid.uuid4().hex
-        now = _utc_iso_z()
-        conn.execute(
-            """
-            INSERT INTO folders (folder_id, name, created_at, updated_at)
-            VALUES (?, ?, ?, ?);
-            """,
-            (folder_id, name, now, now),
-        )
-
-    return {
-        "folder_id": folder_id,
-        "name": name,
-        "created_at": now,
-        "updated_at": now,
-        "created": "1",
-    }
-
-
-def add_items_to_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    fid = (folder_id or "").strip()
-    if not fid:
-        raise ValueError("Folder ID is required.")
-
-    uniq_pmids = _dedupe_nonempty(pmids)
-    uniq_gids = _dedupe_nonempty(guideline_ids)
+def add_evidence_cart_items(pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
+    ensure_evidence_cart_schema()
+    clean_pmids = _dedupe_nonempty(pmids)
+    clean_gids = _dedupe_nonempty(guideline_ids)
     now = _utc_iso_z()
 
     papers_added = 0
     guidelines_added = 0
 
     with _connect_db() as conn:
-        folder_exists = conn.execute(
-            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_exists:
-            raise ValueError("Folder not found.")
-
-        for pmid in uniq_pmids:
-            paper_exists = conn.execute(
-                "SELECT 1 FROM abstracts WHERE pmid=? LIMIT 1;",
-                (pmid,),
-            ).fetchone()
-            if not paper_exists:
-                continue
+        for pmid in clean_pmids:
             cur = conn.execute(
                 """
-                INSERT OR IGNORE INTO folder_papers (folder_id, pmid, added_at)
-                VALUES (?, ?, ?);
+                INSERT OR IGNORE INTO evidence_cart_items (item_type, item_id, added_at)
+                VALUES ('paper', ?, ?);
                 """,
-                (fid, pmid, now),
+                (pmid, now),
             )
             if int(cur.rowcount or 0) > 0:
                 papers_added += 1
 
-        for gid in uniq_gids:
-            guideline_exists = conn.execute(
-                "SELECT 1 FROM guidelines WHERE guideline_id=? LIMIT 1;",
-                (gid,),
-            ).fetchone()
-            if not guideline_exists:
-                continue
+        for gid in clean_gids:
             cur = conn.execute(
                 """
-                INSERT OR IGNORE INTO folder_guidelines (folder_id, guideline_id, added_at)
-                VALUES (?, ?, ?);
+                INSERT OR IGNORE INTO evidence_cart_items (item_type, item_id, added_at)
+                VALUES ('guideline', ?, ?);
                 """,
-                (fid, gid, now),
+                (gid, now),
             )
             if int(cur.rowcount or 0) > 0:
                 guidelines_added += 1
 
-        if papers_added > 0 or guidelines_added > 0:
-            conn.execute(
-                "UPDATE folders SET updated_at=? WHERE folder_id=?;",
-                (_utc_iso_z(), fid),
-            )
-
     return {
-        "papers_selected": str(len(uniq_pmids)),
-        "guidelines_selected": str(len(uniq_gids)),
         "papers_added": str(papers_added),
         "guidelines_added": str(guidelines_added),
         "total_added": str(papers_added + guidelines_added),
     }
 
 
-def get_folder_item_ids(folder_id: str) -> Dict[str, List[str]]:
-    ensure_folders_schema()
+def remove_evidence_cart_items(pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
+    ensure_evidence_cart_schema()
+    clean_pmids = _dedupe_nonempty(pmids)
+    clean_gids = _dedupe_nonempty(guideline_ids)
 
-    fid = (folder_id or "").strip()
-    if not fid:
-        return {"pmids": [], "guideline_ids": []}
-
-    with _connect_db() as conn:
-        folder_exists = conn.execute(
-            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_exists:
-            return {"pmids": [], "guideline_ids": []}
-
-        paper_rows = conn.execute(
-            """
-            SELECT fp.pmid
-            FROM folder_papers fp
-            INNER JOIN abstracts a ON a.pmid = fp.pmid
-            WHERE fp.folder_id=?
-            ORDER BY fp.added_at DESC, fp.pmid DESC;
-            """,
-            (fid,),
-        ).fetchall()
-
-        guideline_rows = conn.execute(
-            """
-            SELECT fg.guideline_id
-            FROM folder_guidelines fg
-            INNER JOIN guidelines g ON g.guideline_id = fg.guideline_id
-            WHERE fg.folder_id=?
-            ORDER BY fg.added_at DESC, fg.guideline_id DESC;
-            """,
-            (fid,),
-        ).fetchall()
-
-    return {
-        "pmids": [(r["pmid"] or "").strip() for r in paper_rows if (r["pmid"] or "").strip()],
-        "guideline_ids": [
-            (r["guideline_id"] or "").strip()
-            for r in guideline_rows
-            if (r["guideline_id"] or "").strip()
-        ],
-    }
-
-
-def rename_folder(folder_id: str, new_name: str) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    fid = (folder_id or "").strip()
-    if not fid:
-        raise ValueError("Folder ID is required.")
-
-    name = re.sub(r"\s+", " ", (new_name or "").strip())
-    if not name:
-        raise ValueError("Folder name cannot be empty.")
-
-    with _connect_db() as conn:
-        folder_row = conn.execute(
-            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_row:
-            raise ValueError("Folder not found.")
-
-        duplicate_row = conn.execute(
-            """
-            SELECT 1
-            FROM folders
-            WHERE name = ? COLLATE NOCASE AND folder_id <> ?
-            LIMIT 1;
-            """,
-            (name, fid),
-        ).fetchone()
-        if duplicate_row:
-            raise ValueError("Folder name already exists.")
-
-        now = _utc_iso_z()
-        conn.execute(
-            "UPDATE folders SET name=?, updated_at=? WHERE folder_id=?;",
-            (name, now, fid),
-        )
-
-    return {
-        "folder_id": fid,
-        "name": name,
-        "updated_at": now,
-    }
-
-
-def remove_items_from_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    fid = (folder_id or "").strip()
-    if not fid:
-        raise ValueError("Folder ID is required.")
-
-    uniq_pmids = _dedupe_nonempty(pmids)
-    uniq_gids = _dedupe_nonempty(guideline_ids)
     papers_removed = 0
     guidelines_removed = 0
 
     with _connect_db() as conn:
-        folder_row = conn.execute(
-            "SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_row:
-            raise ValueError("Folder not found.")
-
-        for pmid in uniq_pmids:
+        for pmid in clean_pmids:
             cur = conn.execute(
-                "DELETE FROM folder_papers WHERE folder_id=? AND pmid=?;",
-                (fid, pmid),
+                "DELETE FROM evidence_cart_items WHERE item_type='paper' AND item_id=?;",
+                (pmid,),
             )
             papers_removed += int(cur.rowcount or 0)
 
-        for gid in uniq_gids:
+        for gid in clean_gids:
             cur = conn.execute(
-                "DELETE FROM folder_guidelines WHERE folder_id=? AND guideline_id=?;",
-                (fid, gid),
+                "DELETE FROM evidence_cart_items WHERE item_type='guideline' AND item_id=?;",
+                (gid,),
             )
             guidelines_removed += int(cur.rowcount or 0)
 
-        if papers_removed > 0 or guidelines_removed > 0:
-            conn.execute(
-                "UPDATE folders SET updated_at=? WHERE folder_id=?;",
-                (_utc_iso_z(), fid),
-            )
-
     return {
-        "papers_selected": str(len(uniq_pmids)),
-        "guidelines_selected": str(len(uniq_gids)),
         "papers_removed": str(papers_removed),
         "guidelines_removed": str(guidelines_removed),
         "total_removed": str(papers_removed + guidelines_removed),
     }
 
 
-def delete_folder(folder_id: str) -> Dict[str, str]:
-    ensure_folders_schema()
-
-    fid = (folder_id or "").strip()
-    if not fid:
-        raise ValueError("Folder ID is required.")
-
+def clear_evidence_cart() -> Dict[str, str]:
+    ensure_evidence_cart_schema()
     with _connect_db() as conn:
-        folder_row = conn.execute(
-            "SELECT name FROM folders WHERE folder_id=? LIMIT 1;",
-            (fid,),
-        ).fetchone()
-        if not folder_row:
-            raise ValueError("Folder not found.")
+        row = conn.execute("SELECT COUNT(*) AS n FROM evidence_cart_items;").fetchone()
+        total = int(row["n"] or 0) if row else 0
+        conn.execute("DELETE FROM evidence_cart_items;")
 
-        name = (folder_row["name"] or "").strip()
-        paper_count_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM folder_papers WHERE folder_id=?;",
-            (fid,),
-        ).fetchone()
-        guideline_count_row = conn.execute(
-            "SELECT COUNT(*) AS n FROM folder_guidelines WHERE folder_id=?;",
-            (fid,),
-        ).fetchone()
-
-        papers_removed = int(paper_count_row["n"] or 0) if paper_count_row else 0
-        guidelines_removed = int(guideline_count_row["n"] or 0) if guideline_count_row else 0
-
-        conn.execute("DELETE FROM folder_papers WHERE folder_id=?;", (fid,))
-        conn.execute("DELETE FROM folder_guidelines WHERE folder_id=?;", (fid,))
-        conn.execute("DELETE FROM folders WHERE folder_id=?;", (fid,))
-
-    return {
-        "folder_id": fid,
-        "name": name,
-        "papers_removed": str(papers_removed),
-        "guidelines_removed": str(guidelines_removed),
-        "total_removed": str(papers_removed + guidelines_removed),
-    }
+    return {"total_removed": str(total)}
 
 
 # ---------------- Guidelines storage + schema ----------------
@@ -1153,6 +911,10 @@ def delete_guideline(guideline_id: str) -> None:
         conn.execute("DELETE FROM guidelines WHERE guideline_id=?;", (gid,))
         try:
             conn.execute("DELETE FROM folder_guidelines WHERE guideline_id=?;", (gid,))
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("DELETE FROM evidence_cart_items WHERE item_type='guideline' AND item_id=?;", (gid,))
         except sqlite3.OperationalError:
             pass
 
