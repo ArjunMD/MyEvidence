@@ -83,6 +83,7 @@ def ensure_schema() -> None:
             """
             CREATE TABLE IF NOT EXISTS search_pubmed_ledger (
                 year_month TEXT NOT NULL,
+                specialty_label TEXT NOT NULL DEFAULT '',
                 journal_label TEXT NOT NULL,
                 study_type_label TEXT NOT NULL,
                 total_matches INTEGER NOT NULL,
@@ -95,6 +96,10 @@ def ensure_schema() -> None:
             );
             """
         )
+        try:
+            conn.execute("ALTER TABLE search_pubmed_ledger ADD COLUMN specialty_label TEXT NOT NULL DEFAULT '';")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_search_pubmed_ledger_checked
@@ -215,6 +220,7 @@ def get_hidden_pubmed_pmids(pmids: List[str]) -> Set[str]:
 
 def upsert_search_pubmed_ledger(
     year_month: str,
+    specialty_label: str,
     journal_label: str,
     study_type_label: str,
     total_matches: int,
@@ -224,6 +230,7 @@ def upsert_search_pubmed_ledger(
     is_verified: bool,
 ) -> None:
     ym = (year_month or "").strip()
+    spec = (specialty_label or "").strip()
     jl = (journal_label or "").strip()
     stype = (study_type_label or "").strip()
     if not ym or not jl or not stype:
@@ -238,12 +245,13 @@ def upsert_search_pubmed_ledger(
         conn.execute(
             """
             INSERT INTO search_pubmed_ledger (
-                year_month, journal_label, study_type_label,
+                year_month, specialty_label, journal_label, study_type_label,
                 total_matches, visible_matches, hidden_matches,
                 is_cleared, is_verified, last_checked_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(year_month, journal_label, study_type_label) DO UPDATE SET
+                specialty_label=excluded.specialty_label,
                 total_matches=excluded.total_matches,
                 visible_matches=excluded.visible_matches,
                 hidden_matches=excluded.hidden_matches,
@@ -253,6 +261,7 @@ def upsert_search_pubmed_ledger(
             """,
             (
                 ym,
+                spec,
                 jl,
                 stype,
                 total_i,
@@ -271,6 +280,7 @@ def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
             """
             SELECT
                 year_month,
+                specialty_label,
                 journal_label,
                 study_type_label,
                 total_matches,
@@ -281,6 +291,7 @@ def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
                 last_checked_at
             FROM search_pubmed_ledger
             ORDER BY
+                specialty_label COLLATE NOCASE ASC,
                 journal_label COLLATE NOCASE ASC,
                 study_type_label COLLATE NOCASE ASC,
                 CAST(SUBSTR(year_month, 1, 4) AS INTEGER) DESC,
@@ -295,6 +306,7 @@ def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
         out.append(
             {
                 "year_month": (r["year_month"] or "").strip(),
+                "specialty_label": (r["specialty_label"] or "").strip(),
                 "journal_label": (r["journal_label"] or "").strip(),
                 "study_type_label": (r["study_type_label"] or "").strip(),
                 "total_matches": str(int(r["total_matches"] or 0)),

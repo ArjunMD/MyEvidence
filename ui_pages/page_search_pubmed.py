@@ -11,6 +11,36 @@ from extract import search_pubmed_by_date_filters_page
 from pages_shared import _filter_search_pubmed_rows
 
 SEARCH_FETCH_LIMIT = 200
+LEDGER_STUDY_TYPE_LABEL = "All"
+COMBINED_PUBLICATION_TYPE_TERMS = [
+    '"Clinical Trial"[Publication Type]',
+    '"Meta-Analysis"[Publication Type]',
+    '"Systematic Review"[Publication Type]',
+]
+SPECIALTY_JOURNAL_TERMS = {
+    "General": {
+        "NEJM": '"N Engl J Med"[jour]',
+        "JAMA": '"JAMA"[jour]',
+        "Lancet": '"Lancet"[jour]',
+        "BMJ": '"BMJ"[jour]',
+        "Nat Med": '"Nat Med"[jour]',
+        "AIM": '"Ann Intern Med"[jour]',
+    },
+    "Neurology": {
+        "Lancet Neurology": '"Lancet Neurol"[Journal]',
+    },
+}
+
+
+def _infer_specialty_from_journal_label(journal_label: str) -> str:
+    jl = (journal_label or "").strip().lower()
+    if not jl:
+        return "—"
+    for specialty, journals in SPECIALTY_JOURNAL_TERMS.items():
+        for label in journals.keys():
+            if jl == (label or "").strip().lower():
+                return specialty
+    return "—"
 
 
 def _run_search_page(
@@ -129,11 +159,11 @@ def _canonical_ledger_study_type(label: str) -> str:
 def _merge_cleared_all_rows(table_rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
     """
     Rule priority:
-    For the same journal + month, if Clinical Trial + Meta analysis + Systematic Review
+    For the same specialty + journal + month, if Clinical Trial + Meta analysis + Systematic Review
     are all cleared, replace those rows with one cleared row labeled Study type = All.
     """
     required = {"clinical_trial", "meta_analysis", "systematic_review"}
-    grouped: Dict[Tuple[str, str], List[Tuple[int, Dict[str, object], str]]] = {}
+    grouped: Dict[Tuple[str, str, str], List[Tuple[int, Dict[str, object], str]]] = {}
 
     for idx, row in enumerate(table_rows):
         if (row.get("Status") or "") != "Cleared":
@@ -141,9 +171,10 @@ def _merge_cleared_all_rows(table_rows: List[Dict[str, object]]) -> List[Dict[st
         canonical = _canonical_ledger_study_type(str(row.get("Study type") or ""))
         if canonical not in required:
             continue
+        specialty_key = str(row.get("Specialty") or "").strip().lower()
         journal_key = str(row.get("Journal") or "").strip().lower()
         ym_key = str(row.get("_ym_raw") or "").strip()
-        grouped.setdefault((journal_key, ym_key), []).append((idx, row, canonical))
+        grouped.setdefault((specialty_key, journal_key, ym_key), []).append((idx, row, canonical))
 
     to_remove: set[int] = set()
     merged_rows: List[Dict[str, object]] = []
@@ -165,6 +196,7 @@ def _merge_cleared_all_rows(table_rows: List[Dict[str, object]]) -> List[Dict[st
         match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in chosen_rows)
         merged_rows.append(
             {
+                "Specialty": rep.get("Specialty") or "—",
                 "Journal": rep.get("Journal") or "—",
                 "Study type": "All",
                 "Month": rep.get("Month") or "—",
@@ -194,10 +226,10 @@ def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], tod
     """
     Second rule:
     For rows with Status=Cleared and Study type=All, merge consecutive months for the
-    same journal into one row. Month label becomes "First month to Last month",
+    same specialty + journal into one row. Month label becomes "First month to Last month",
     or "First month to present" when the run ends at the latest clearable month.
     """
-    groups: Dict[str, List[Tuple[int, Dict[str, object], int]]] = {}
+    groups: Dict[Tuple[str, str], List[Tuple[int, Dict[str, object], int]]] = {}
     last_clearable_ym = _latest_clearable_year_month(today=today)
     for idx, row in enumerate(table_rows):
         if (row.get("Status") or "") != "Cleared":
@@ -208,8 +240,9 @@ def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], tod
         if ym is None:
             continue
         month_idx = int(ym[0]) * 12 + int(ym[1])
+        skey = str(row.get("Specialty") or "").strip().lower()
         jkey = str(row.get("Journal") or "").strip().lower()
-        groups.setdefault(jkey, []).append((idx, row, month_idx))
+        groups.setdefault((skey, jkey), []).append((idx, row, month_idx))
 
     to_remove: set[int] = set()
     merged_rows: List[Dict[str, object]] = []
@@ -240,6 +273,7 @@ def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], tod
 
                 merged_rows.append(
                     {
+                        "Specialty": last_row.get("Specialty") or "—",
                         "Journal": last_row.get("Journal") or "—",
                         "Study type": "All",
                         "Month": month_label,
@@ -270,6 +304,7 @@ def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], tod
 
             merged_rows.append(
                 {
+                    "Specialty": last_row.get("Specialty") or "—",
                     "Journal": last_row.get("Journal") or "—",
                     "Study type": "All",
                     "Month": month_label,
@@ -355,6 +390,8 @@ def _render_search_ledger() -> None:
 
         table_rows.append(
             {
+                "Specialty": (r.get("specialty_label") or "").strip()
+                or _infer_specialty_from_journal_label((r.get("journal_label") or "").strip()),
                 "Journal": (r.get("journal_label") or "").strip() or "—",
                 "Study type": (r.get("study_type_label") or "").strip() or "—",
                 "Month": month_label,
@@ -376,6 +413,7 @@ def _render_search_ledger() -> None:
         key=lambda x: (
             -_safe_int(x.get("_ym_sort"), -1),
             _safe_int(x.get("_status_rank"), 99),
+            str(x.get("Specialty") or "").lower(),
             str(x.get("Journal") or "").lower(),
             str(x.get("Study type") or "").lower(),
         ),
@@ -387,7 +425,7 @@ def _render_search_ledger() -> None:
         st.caption("No ledger entries to display.")
         return
 
-    cols = ["Journal", "Study type", "Month", "Status"]
+    cols = ["Specialty", "Journal", "Month", "Status"]
     df = pd.DataFrame(display_rows)
     if not df.empty:
         df = df[cols]
@@ -396,7 +434,7 @@ def _render_search_ledger() -> None:
 
 def render() -> None:
     st.title("🔎 Search PubMed")
-    st.caption("Search PubMed by one calendar month, journal, and study type.")
+    st.caption("Search PubMed by one calendar month, specialty, and journal.")
 
     today = datetime.now(timezone.utc).date()
     default_month_date = today - timedelta(days=30)
@@ -429,47 +467,46 @@ def render() -> None:
             key="search_pubmed_month",
         )
 
-    journal_query_by_label = {
-        "NEJM": '"N Engl J Med"[jour]',
-        "JAMA": '"JAMA"[jour]',
-        "Lancet": '"Lancet"[jour]',
-        "BMJ": '"BMJ"[jour]',
-        "Nat Med": '"Nat Med"[jour]',
-        "AIM": '"Ann Intern Med"[jour]',
-    }
-    study_type_queries = {
-        "Clinical Trial": ['"Clinical Trial"[Publication Type]'],
-        "Meta analysis": ['"Meta-Analysis"[Publication Type]'],
-        "Systematic Review": ['"Systematic Review"[Publication Type]'],
-    }
-
     c3, c4 = st.columns(2)
     with c3:
+        specialty_options = list(SPECIALTY_JOURNAL_TERMS.keys())
+        sticky_specialty = (sticky.get("specialty") or "").strip()
+        specialty_default_idx = (
+            specialty_options.index(sticky_specialty)
+            if sticky_specialty in specialty_options
+            else 0
+        )
+        specialty_label = st.selectbox(
+            "Specialty",
+            options=specialty_options,
+            index=specialty_default_idx,
+            key="search_pubmed_specialty",
+        )
+    with c4:
+        journal_query_by_label = SPECIALTY_JOURNAL_TERMS.get(specialty_label, {})
         journal_options = list(journal_query_by_label.keys())
+        if not journal_options:
+            st.error(f"No journal options configured for specialty: {specialty_label}")
+            st.stop()
+
         sticky_journal = (sticky.get("journal") or "").strip()
-        journal_default_idx = journal_options.index(sticky_journal) if sticky_journal in journal_options else 0
+        journal_default_idx = (
+            journal_options.index(sticky_journal)
+            if sticky_journal in journal_options
+            else 0
+        )
         journal_label = st.selectbox(
-            "Select Journal",
+            "Journal",
             options=journal_options,
             index=journal_default_idx,
             key="search_pubmed_journal",
-        )
-    with c4:
-        study_type_options = list(study_type_queries.keys())
-        sticky_study_type = (sticky.get("study_type") or "").strip()
-        study_type_default_idx = study_type_options.index(sticky_study_type) if sticky_study_type in study_type_options else 0
-        study_type_label = st.selectbox(
-            "Study type filter",
-            options=study_type_options,
-            index=study_type_default_idx,
-            key="search_pubmed_study_type",
         )
 
     st.session_state["search_pubmed_filters_sticky"] = {
         "year": int(selected_year),
         "month": int(selected_month),
+        "specialty": (specialty_label or "").strip(),
         "journal": (journal_label or "").strip(),
-        "study_type": (study_type_label or "").strip(),
     }
 
     b_search, b_clear = st.columns(2)
@@ -500,7 +537,7 @@ def render() -> None:
             start_s = start_date.strftime("%Y/%m/%d")
             end_s = end_date.strftime("%Y/%m/%d")
             journal_term = journal_query_by_label.get(journal_label, "")
-            pub_terms = study_type_queries.get(study_type_label, [])
+            pub_terms = list(COMBINED_PUBLICATION_TYPE_TERMS)
             try:
                 with st.spinner("Searching PubMed…"):
                     page = _run_search_page(
@@ -522,8 +559,9 @@ def render() -> None:
                     "year_month_label": f"{calendar.month_name[int(selected_month)]} {int(selected_year)}",
                 }
                 st.session_state["search_pubmed_filters"] = {
+                    "specialty": specialty_label,
                     "journal": journal_label,
-                    "study_type": study_type_label,
+                    "study_type": LEDGER_STUDY_TYPE_LABEL,
                 }
             except requests.HTTPError as e:
                 st.error(f"PubMed search failed: {e}")
@@ -547,6 +585,7 @@ def render() -> None:
     end_s = (rng.get("end") or "").strip()
     ym_label = (rng.get("year_month_label") or "").strip()
     filters = st.session_state.get("search_pubmed_filters") or {}
+    specialty_label = (filters.get("specialty") or "").strip()
     journal_label = (filters.get("journal") or "").strip()
     study_type_label = (filters.get("study_type") or "").strip()
     header_bits = []
@@ -554,8 +593,8 @@ def render() -> None:
         header_bits.append(f"Month: {ym_label}")
     elif start_s and end_s:
         header_bits.append(f"Range: {start_s} to {end_s}")
-    if journal_label or study_type_label:
-        header_bits.append(f"Filters: {journal_label or '—'} • {study_type_label or '—'}")
+    if specialty_label or journal_label:
+        header_bits.append(f"Filters: {specialty_label or '—'} • {journal_label or '—'}")
     if header_bits:
         st.caption(" | ".join(header_bits))
     st.caption(f"{total_count} matches ({visible_count} visible, {hidden_count} hidden)")
@@ -567,8 +606,9 @@ def render() -> None:
     if not _is_future_year_month(ym_key, today=today):
         upsert_search_pubmed_ledger(
             year_month=ym_key,
+            specialty_label=specialty_label,
             journal_label=journal_label,
-            study_type_label=study_type_label,
+            study_type_label=study_type_label or LEDGER_STUDY_TYPE_LABEL,
             total_matches=total_count,
             visible_matches=visible_count,
             hidden_matches=hidden_count,
