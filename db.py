@@ -101,6 +101,7 @@ def ensure_schema() -> None:
             ON search_pubmed_ledger(last_checked_at DESC);
             """
         )
+    ensure_folders_schema()
     ensure_evidence_cart_schema()
 
 
@@ -632,6 +633,309 @@ def list_abstracts_for_history(limit: int) -> List[Dict[str, str]]:
             }
         )
     return out
+
+
+# ---------------- Folders ----------------
+
+def ensure_folders_schema() -> None:
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS folders (
+                folder_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS folder_papers (
+                folder_id TEXT NOT NULL,
+                pmid TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (folder_id, pmid)
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS folder_guidelines (
+                folder_id TEXT NOT NULL,
+                guideline_id TEXT NOT NULL,
+                added_at TEXT NOT NULL,
+                PRIMARY KEY (folder_id, guideline_id)
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_folder_papers_folder
+            ON folder_papers(folder_id);
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_folder_guidelines_folder
+            ON folder_guidelines(folder_id);
+            """
+        )
+
+
+def list_folders(limit: int = 500) -> List[Dict[str, str]]:
+    ensure_folders_schema()
+    with _connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                f.folder_id,
+                f.name,
+                f.created_at,
+                f.updated_at,
+                COALESCE(fp.paper_count, 0) AS paper_count,
+                COALESCE(fg.guideline_count, 0) AS guideline_count
+            FROM folders f
+            LEFT JOIN (
+                SELECT folder_id, COUNT(*) AS paper_count
+                FROM folder_papers
+                GROUP BY folder_id
+            ) fp
+                ON fp.folder_id = f.folder_id
+            LEFT JOIN (
+                SELECT folder_id, COUNT(*) AS guideline_count
+                FROM folder_guidelines
+                GROUP BY folder_id
+            ) fg
+                ON fg.folder_id = f.folder_id
+            ORDER BY f.name COLLATE NOCASE ASC
+            LIMIT ?;
+            """,
+            (max(1, int(limit or 500)),),
+        ).fetchall()
+
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        paper_count = int(r["paper_count"] or 0)
+        guideline_count = int(r["guideline_count"] or 0)
+        out.append(
+            {
+                "folder_id": (r["folder_id"] or "").strip(),
+                "name": (r["name"] or "").strip(),
+                "created_at": (r["created_at"] or "").strip(),
+                "updated_at": (r["updated_at"] or "").strip(),
+                "paper_count": str(paper_count),
+                "guideline_count": str(guideline_count),
+                "total_count": str(paper_count + guideline_count),
+            }
+        )
+    return out
+
+
+def create_or_get_folder(name: str) -> Dict[str, str]:
+    ensure_folders_schema()
+    clean_name = re.sub(r"\s+", " ", (name or "").strip())
+    if not clean_name:
+        return {}
+
+    with _connect_db() as conn:
+        row = conn.execute(
+            "SELECT folder_id, name FROM folders WHERE name = ? COLLATE NOCASE LIMIT 1;",
+            (clean_name,),
+        ).fetchone()
+        if row:
+            return {
+                "folder_id": (row["folder_id"] or "").strip(),
+                "name": (row["name"] or "").strip(),
+                "created": "0",
+            }
+
+        now = _utc_iso_z()
+        folder_id = uuid.uuid4().hex
+        try:
+            conn.execute(
+                """
+                INSERT INTO folders (folder_id, name, created_at, updated_at)
+                VALUES (?, ?, ?, ?);
+                """,
+                (folder_id, clean_name, now, now),
+            )
+            return {"folder_id": folder_id, "name": clean_name, "created": "1"}
+        except sqlite3.IntegrityError:
+            row = conn.execute(
+                "SELECT folder_id, name FROM folders WHERE name = ? COLLATE NOCASE LIMIT 1;",
+                (clean_name,),
+            ).fetchone()
+            if row:
+                return {
+                    "folder_id": (row["folder_id"] or "").strip(),
+                    "name": (row["name"] or "").strip(),
+                    "created": "0",
+                }
+    return {}
+
+
+def add_items_to_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
+    ensure_folders_schema()
+    fid = (folder_id or "").strip()
+    if not fid:
+        return {"papers_added": "0", "guidelines_added": "0", "total_added": "0"}
+
+    clean_pmids = _dedupe_nonempty(pmids)
+    clean_gids = _dedupe_nonempty(guideline_ids)
+    if not clean_pmids and not clean_gids:
+        return {"papers_added": "0", "guidelines_added": "0", "total_added": "0"}
+
+    now = _utc_iso_z()
+    papers_added = 0
+    guidelines_added = 0
+
+    with _connect_db() as conn:
+        row = conn.execute("SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;", (fid,)).fetchone()
+        if not row:
+            return {"papers_added": "0", "guidelines_added": "0", "total_added": "0"}
+
+        for pmid in clean_pmids:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO folder_papers (folder_id, pmid, added_at)
+                VALUES (?, ?, ?);
+                """,
+                (fid, pmid, now),
+            )
+            papers_added += int(cur.rowcount or 0)
+
+        for gid in clean_gids:
+            cur = conn.execute(
+                """
+                INSERT OR IGNORE INTO folder_guidelines (folder_id, guideline_id, added_at)
+                VALUES (?, ?, ?);
+                """,
+                (fid, gid, now),
+            )
+            guidelines_added += int(cur.rowcount or 0)
+
+        if papers_added > 0 or guidelines_added > 0:
+            conn.execute("UPDATE folders SET updated_at=? WHERE folder_id=?;", (now, fid))
+
+    return {
+        "papers_added": str(papers_added),
+        "guidelines_added": str(guidelines_added),
+        "total_added": str(papers_added + guidelines_added),
+    }
+
+
+def get_folder_item_ids(folder_id: str) -> Dict[str, List[str]]:
+    ensure_folders_schema()
+    fid = (folder_id or "").strip()
+    if not fid:
+        return {"pmids": [], "guideline_ids": []}
+
+    with _connect_db() as conn:
+        paper_rows = conn.execute(
+            """
+            SELECT pmid
+            FROM folder_papers
+            WHERE folder_id=?
+            ORDER BY added_at DESC, pmid ASC;
+            """,
+            (fid,),
+        ).fetchall()
+        guideline_rows = conn.execute(
+            """
+            SELECT guideline_id
+            FROM folder_guidelines
+            WHERE folder_id=?
+            ORDER BY added_at DESC, guideline_id ASC;
+            """,
+            (fid,),
+        ).fetchall()
+
+    pmids = _dedupe_nonempty([(r["pmid"] or "").strip() for r in paper_rows])
+    gids = _dedupe_nonempty([(r["guideline_id"] or "").strip() for r in guideline_rows])
+    return {"pmids": pmids, "guideline_ids": gids}
+
+
+def remove_items_from_folder(folder_id: str, pmids: List[str], guideline_ids: List[str]) -> Dict[str, str]:
+    ensure_folders_schema()
+    fid = (folder_id or "").strip()
+    if not fid:
+        return {"papers_removed": "0", "guidelines_removed": "0", "total_removed": "0"}
+
+    clean_pmids = _dedupe_nonempty(pmids)
+    clean_gids = _dedupe_nonempty(guideline_ids)
+    if not clean_pmids and not clean_gids:
+        return {"papers_removed": "0", "guidelines_removed": "0", "total_removed": "0"}
+
+    papers_removed = 0
+    guidelines_removed = 0
+
+    with _connect_db() as conn:
+        row = conn.execute("SELECT 1 FROM folders WHERE folder_id=? LIMIT 1;", (fid,)).fetchone()
+        if not row:
+            return {"papers_removed": "0", "guidelines_removed": "0", "total_removed": "0"}
+
+        for pmid in clean_pmids:
+            cur = conn.execute(
+                "DELETE FROM folder_papers WHERE folder_id=? AND pmid=?;",
+                (fid, pmid),
+            )
+            papers_removed += int(cur.rowcount or 0)
+
+        for gid in clean_gids:
+            cur = conn.execute(
+                "DELETE FROM folder_guidelines WHERE folder_id=? AND guideline_id=?;",
+                (fid, gid),
+            )
+            guidelines_removed += int(cur.rowcount or 0)
+
+        if papers_removed > 0 or guidelines_removed > 0:
+            conn.execute("UPDATE folders SET updated_at=? WHERE folder_id=?;", (_utc_iso_z(), fid))
+
+    return {
+        "papers_removed": str(papers_removed),
+        "guidelines_removed": str(guidelines_removed),
+        "total_removed": str(papers_removed + guidelines_removed),
+    }
+
+
+def delete_folder(folder_id: str) -> Dict[str, str]:
+    ensure_folders_schema()
+    fid = (folder_id or "").strip()
+    if not fid:
+        return {"deleted": "0", "name": "", "papers_removed": "0", "guidelines_removed": "0"}
+
+    with _connect_db() as conn:
+        folder_row = conn.execute(
+            "SELECT name FROM folders WHERE folder_id=? LIMIT 1;",
+            (fid,),
+        ).fetchone()
+        if not folder_row:
+            return {"deleted": "0", "name": "", "papers_removed": "0", "guidelines_removed": "0"}
+
+        name = (folder_row["name"] or "").strip()
+        paper_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_papers WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+        guideline_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM folder_guidelines WHERE folder_id=?;",
+            (fid,),
+        ).fetchone()
+        papers_removed = int((paper_row["n"] if paper_row else 0) or 0)
+        guidelines_removed = int((guideline_row["n"] if guideline_row else 0) or 0)
+
+        conn.execute("DELETE FROM folder_papers WHERE folder_id=?;", (fid,))
+        conn.execute("DELETE FROM folder_guidelines WHERE folder_id=?;", (fid,))
+        cur = conn.execute("DELETE FROM folders WHERE folder_id=?;", (fid,))
+        deleted = "1" if int(cur.rowcount or 0) > 0 else "0"
+
+    return {
+        "deleted": deleted,
+        "name": name,
+        "papers_removed": str(papers_removed),
+        "guidelines_removed": str(guidelines_removed),
+    }
 
 
 # ---------------- Evidence cart ----------------
