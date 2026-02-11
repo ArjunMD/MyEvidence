@@ -14,7 +14,7 @@ For clinicians who love Pubmed, but hate having 37 tabs open and trying to track
 - **Browse studies**: Browse by year or specialty. Title, journal, number of patients, and author's conclusion are easily visible. Includes a search bar.
 - **Single-study view**: View one selected record in detail. Also includes a search bar. 
 - **Generate meta**: Select an evidence base and then ask AI a focused question. You can also add evidence to folders. This makes selecting larger evidence bases quicker.
-- **Search PubMed**: Choose a year, month, journal, and study type, and see all results (no topic search). Journals and study types are intentionally limited to high impact and high level of evidence, respectively. As you search, decide whether the paper is irrelevant to you (click "Don't show again"), or load it in the PMID → Abstract page and save it. The ledger tracks progress over time.
+- **Search PubMed**: Choose a year, month, specialty, and journal, and see all results (no topic search). Journals and study types are intentionally limited to high impact and high level of evidence, respectively. As you search, decide whether the paper is irrelevant to you (click "Don't show again"), or load it in the PMID → Abstract page and save it. The ledger tracks progress over time.
 - **Delete**: Delete guidelines or abstracts if you want to. You may want to delete an abstract just so you can re-fetch it and edit it.
 - **About**: This page.
 - **History**: In case you want to know when you fetched or uploaded something.

@@ -127,7 +127,7 @@ def render() -> None:
         st.info("Evidence cart is empty. Add studies from Browse studies, then return here.")
 
     st.divider()
-    st.markdown("### 1) Folder ↔ Cart")
+    st.markdown("### 1) Add Folder to Evidence Cart or Evidence Cart to Folder")
     c_folder_add, c_folder_save = st.columns([1, 1], gap="large")
 
     with c_folder_add:
