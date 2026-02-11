@@ -28,6 +28,8 @@ SPECIALTY_JOURNAL_TERMS = {
     },
     "Neurology": {
         "Lancet Neurology": '"Lancet Neurol"[Journal]',
+        "JAMA Neurology": '"JAMA Neurol"[Journal]',
+        "Stroke": '"Stroke"[Journal]',
     },
 }
 
@@ -434,8 +436,7 @@ def _render_search_ledger() -> None:
 
 def render() -> None:
     st.title("🔎 Search PubMed")
-    st.caption("Search PubMed by one calendar month, specialty, and journal.")
-
+    
     today = datetime.now(timezone.utc).date()
     default_month_date = today - timedelta(days=30)
     default_year = int(default_month_date.year)
