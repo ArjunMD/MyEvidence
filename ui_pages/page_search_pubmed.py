@@ -26,10 +26,77 @@ SPECIALTY_JOURNAL_TERMS = {
         "Nat Med": '"Nat Med"[jour]',
         "AIM": '"Ann Intern Med"[jour]',
     },
+    "Internal Medicine": {
+        "JAMA Internal Medicine": '"JAMA Intern Med"[Journal]',
+        "JGIM": '"J Gen Intern Med"[Journal]',
+    },
     "Neurology": {
-        "Lancet Neurology": '"Lancet Neurol"[Journal]',
         "JAMA Neurology": '"JAMA Neurol"[Journal]',
+        "Lancet Neurology": '"Lancet Neurol"[Journal]',
         "Stroke": '"Stroke"[Journal]',
+    },
+    "Critical care": {
+        "Lancet Respiratory Medicine": '"Lancet Respir Med"[Journal]',
+        "Intensive Care Medicine": '"Intensive Care Med"[Journal]',
+        "Critical Care": '"Crit Care"[Journal]',
+    },
+    "Cardiology": {
+        "JAMA Cardiology": '"JAMA Cardiol"[Journal]',
+        "Journal of the American College of Cardiology": '"J Am Coll Cardiol"[Journal]',
+        "European Heart Journal": '"Eur Heart J"[Journal]',
+        "Circulation": '"Circulation"[Journal]',
+    },
+    "Infectious Disease": {
+        "Lancet Infectious Diseases": '"Lancet Infect Dis"[Journal]',
+        "Clinical Infectious Diseases": '"Clin Infect Dis"[Journal]',
+    },
+    "Pulmonology": {
+        "Lancet Respiratory Medicine": '"Lancet Respir Med"[Journal]',
+        "American Journal of Respiratory and Critical Care Medicine": '"Am J Respir Crit Care Med"[Journal]',
+    },
+    "Surgery": {
+        "JAMA Surgery": '"JAMA Surg"[Journal]',
+        "Annals of Surgery": '"Ann Surg"[Journal]',
+    },
+    "Psychiatry": {
+        "JAMA Psychiatry": '"JAMA Psychiatry"[Journal]',
+        "Lancet Psychiatry": '"Lancet Psychiatry"[Journal]',
+        "World Psychiatry": '"World Psychiatry"[Journal]',
+    },
+    "Gastroenterology": {
+        "Lancet Gastroenterology & Hepatology": '"Lancet Gastroenterol Hepatol"[Journal]',
+        "Gastroenterology": '"Gastroenterology"[Journal]',
+        "Gut": '"Gut"[Journal]',
+    },
+    "Emergency Medicine": {
+        "Annals of Emergency Medicine": '"Ann Emerg Med"[Journal]',
+        "Resuscitation": '"Resuscitation"[Journal]',
+    },
+    "Nephrology": {
+        "Journal of the American Society of Nephrology": '"J Am Soc Nephrol"[Journal]',
+        "Kidney International": '"Kidney Int"[Journal]',
+    },
+    "Endocrinology/Diabetes": {
+        "Lancet Diabetes & Endocrinology": '"Lancet Diabetes Endocrinol"[Journal]',
+        "Diabetes Care": '"Diabetes Care"[Journal]',
+        "Journal of Clinical Endocrinology & Metabolism": '"J Clin Endocrinol Metab"[Journal]',
+    },
+    "Hematology": {
+        "Lancet Haematology": '"Lancet Haematol"[Journal]',
+        "Blood": '"Blood"[Journal]',
+    },
+    "Oncology": {
+        "JAMA Oncology": '"JAMA Oncol"[Journal]',
+        "Lancet Oncology": '"Lancet Oncol"[Journal]',
+        "Journal of Clinical Oncology": '"J Clin Oncol"[Journal]',
+    },
+    "Rheumatology": {
+        "Lancet Rheumatology": '"Lancet Rheumatol"[Journal]',
+        "Annals of the Rheumatic Diseases": '"Ann Rheum Dis"[Journal]',
+    },
+    "Hepatology": {
+        "Hepatology": '"Hepatology"[Journal]',
+        "Journal of Hepatology": '"J Hepatol"[Journal]',
     },
 }
 
@@ -421,13 +488,13 @@ def _render_search_ledger() -> None:
         ),
     )
 
-    display_rows = [r for r in table_rows if (r.get("Status") or "") != "Not cleared"]
+    display_rows = [r for r in table_rows if (r.get("Status") or "") == "Cleared"]
 
     if not display_rows:
         st.caption("No ledger entries to display.")
         return
 
-    cols = ["Specialty", "Journal", "Month", "Status"]
+    cols = ["Specialty", "Journal", "Month"]
     df = pd.DataFrame(display_rows)
     if not df.empty:
         df = df[cols]
