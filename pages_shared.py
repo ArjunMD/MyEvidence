@@ -353,16 +353,16 @@ def get_focused_question_instructions_lines() -> List[str]:
     return [
         "You are helping a clinician answer a focused clinical question using multiple studies and guidelines.",
         "Write an answer to the question in the following format: First, give a concise answer (best attempt).",
-        "Next, after a blank line, summarize the evidence that supports the answer. Use bullet points.",
-        "Next, after a blank line, summarize the limitations of the above evidence, evidence that conflicts with the above, or evidence that supports an alternate answer. Use bullet points.",
+        "Next, summarize the evidence that supports the answer. Use bullet points.",
+        "Next, summarize the limitations of the above evidence, evidence that conflicts with the above, or evidence that supports an alternate answer. Use bullet points.",
         "Hard rules:",
         "- Use ONLY information in the provided blocks. Do not invent details.",
         "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
         "- If studies or guidelines conflict or are too heterogeneous/unclear, say so plainly.",
         "- If it is difficult to answer the question in a single way, say so plainly and give the different possible answers along with the evidence for each.",
         "- Mention key limitations that are explicitly apparent without overreaching.",
-        "- Title each section with a bold heading then a colon.",
         "- When making a substantive claim, cite source label(s) exactly as shown in SOURCES in parentheses (e.g., STUDY 2; GUIDELINE 5).",
+        "- Title each section with a bold heading then a colon.",
         "- Tone: Clear and organized",
     ]
 
