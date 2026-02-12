@@ -52,6 +52,7 @@ SPECIALTY_JOURNAL_TERMS = {
     "Pulmonology": {
         "Lancet Respiratory Medicine": '"Lancet Respir Med"[Journal]',
         "American Journal of Respiratory and Critical Care Medicine": '"Am J Respir Crit Care Med"[Journal]',
+        "CHEST": '"Chest"[Journal]',
     },
     "Surgery": {
         "JAMA Surgery": '"JAMA Surg"[Journal]',
