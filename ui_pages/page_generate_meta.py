@@ -15,6 +15,7 @@ from pages_shared import (
     META_MAX_STUDIES_HARD_CAP,
     _get_evidence_cart_ids,
     _set_evidence_cart_ids,
+    get_focused_question_instructions_text,
     gpt_generate_meta_combined,
 )
 
@@ -254,10 +255,12 @@ def render() -> None:
 
     st.divider()
     st.markdown("### 3) Ask focused question")
+    focused_question_help = get_focused_question_instructions_text()
     prompt_text = st.text_input(
         "Focused question",
         placeholder="e.g., Does X improve Y in Z population?",
         key="meta_focused_question",
+        help=focused_question_help,
     )
 
     can_generate = bool(kept_pmids or kept_gids)

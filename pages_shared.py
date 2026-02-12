@@ -348,6 +348,28 @@ def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
     return f"{header}\n\n{disp}"
 
 
+def get_focused_question_instructions_lines() -> List[str]:
+    return [
+        "You are helping a clinician answer a focused clinical question using multiple studies and guidelines.",
+        "Write an answer to the question in the following format: First, give a concise answer (best attempt).",
+        "Next, after a blank line, summarize the evidence that supports the answer. Use bullet points.",
+        "Next, after a blank line, summarize the limitations of the above evidence, evidence that conflicts with the above, or evidence that supports an alternate answer. Use bullet points.",
+        "Hard rules:",
+        "- Use ONLY information in the provided blocks. Do not invent details.",
+        "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
+        "- If studies or guidelines conflict or are too heterogeneous/unclear, say so plainly.",
+        "- If it is difficult to answer the question in a single way, say so plainly and give the different possible answers along with the evidence for each.",
+        "- Mention key limitations that are explicitly apparent without overreaching.",
+        "- Title each section with a bold heading then a colon.",
+        "- When making a substantive claim, cite the source label(s) in parentheses (e.g., STUDY 2; GUIDELINE 5).",
+        "- Tone: Clear and organized",
+    ]
+
+
+def get_focused_question_instructions_text() -> str:
+    return "\n".join(get_focused_question_instructions_lines()).strip()
+
+
 def gpt_generate_meta_combined(
     pmids: List[str],
     guideline_ids: List[str],
@@ -394,38 +416,7 @@ def gpt_generate_meta_combined(
 
     instructions_lines: List[str] = []
     if mode_clean == "answer":
-        instructions_lines.append(
-            "You are helping a clinician answer a focused clinical question using multiple studies and guidelines."
-        )
-        instructions_lines.append(
-            "Write ONE paragraph that directly addresses the question using only information from the provided sources."
-        )
-    else:
-        instructions_lines.append(
-            "Make up a nursery rhyme."
-        )
-
-    instructions_lines.extend(
-        [
-            "Hard rules:",
-            "- Use ONLY information in the provided blocks. Do not invent details.",
-            "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
-            "- If studies or guidelines conflict or are too heterogeneous/unclear, say so plainly.",
-            "- Mention key limitations that are explicitly apparent without overreaching.",
-            "- Output can be a single paragraph, but it can also include a few brief bullet points if that helps clarity.",
-            "- When making a substantive claim, cite the source label(s) in parentheses (e.g., STUDY 2; GUIDELINE 5).",
-            "- Tone: Clear and organized",
-        ]
-    )
-
-    if mode_clean == "answer":
-        instructions_lines.append(
-            "- Explicitly answer the question by summarizing the evidence across all sources."
-        )
-    elif prompt_text:
-        instructions_lines.append(
-            "- If a prompt is provided, orient the synthesis around it."
-        )
+        instructions_lines.extend(get_focused_question_instructions_lines())
 
     instructions = "\n".join(instructions_lines) + "\n"
 
