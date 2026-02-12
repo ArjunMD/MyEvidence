@@ -36,7 +36,6 @@ SPECIALTY_JOURNAL_TERMS = {
         "Stroke": '"Stroke"[Journal]',
     },
     "Critical care": {
-        "Lancet Respiratory Medicine": '"Lancet Respir Med"[Journal]',
         "Intensive Care Medicine": '"Intensive Care Med"[Journal]',
         "Critical Care": '"Crit Care"[Journal]',
     },
