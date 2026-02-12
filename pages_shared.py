@@ -337,8 +337,9 @@ def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
     year = (meta.get("pub_year") or "").strip()
     spec = (meta.get("specialty") or "").strip()
 
-    header_bits: List[str] = [b for b in [name or f"Guideline {gid}", year, spec] if b]
-    header = f"{idx}. " + " • ".join(header_bits)
+    title = name or f"Guideline {gid}"
+    header_bits: List[str] = [b for b in [year, spec] if b]
+    header = f"GUIDELINE {idx}: {title}" + (f" ({' • '.join(header_bits)})" if header_bits else "")
 
     disp = (get_guideline_recommendations_display(gid) or "").strip()
     if not disp:
@@ -361,13 +362,9 @@ def get_focused_question_instructions_lines() -> List[str]:
         "- If it is difficult to answer the question in a single way, say so plainly and give the different possible answers along with the evidence for each.",
         "- Mention key limitations that are explicitly apparent without overreaching.",
         "- Title each section with a bold heading then a colon.",
-        "- When making a substantive claim, cite the source label(s) in parentheses (e.g., STUDY 2; GUIDELINE 5).",
+        "- When making a substantive claim, cite source label(s) exactly as shown in SOURCES in parentheses (e.g., STUDY 2; GUIDELINE 5).",
         "- Tone: Clear and organized",
     ]
-
-
-def get_focused_question_instructions_text() -> str:
-    return "\n".join(get_focused_question_instructions_lines()).strip()
 
 
 def gpt_generate_meta_combined(
@@ -385,13 +382,12 @@ def gpt_generate_meta_combined(
     blocks: List[str] = []
     idx = 1
     for p in pmids:
-        rec = get_record(p)
-        if rec:
-            try:
-                blocks.append(_pack_study_for_meta(rec, idx, include_abstract=include_abstract))
-                idx += 1
-            except Exception:
-                continue
+        rec = get_record(p) or {"pmid": p}
+        try:
+            blocks.append(_pack_study_for_meta(rec, idx, include_abstract=include_abstract))
+            idx += 1
+        except Exception:
+            continue
 
     for g in guideline_ids:
         try:

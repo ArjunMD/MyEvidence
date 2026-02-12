@@ -15,7 +15,6 @@ from pages_shared import (
     META_MAX_STUDIES_HARD_CAP,
     _get_evidence_cart_ids,
     _set_evidence_cart_ids,
-    get_focused_question_instructions_text,
     gpt_generate_meta_combined,
 )
 
@@ -56,6 +55,7 @@ def _folder_option_label(folder: Dict[str, str]) -> str:
 
 def _review_rows(pmids: List[str], gids: List[str]) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
+    idx = 1
 
     for pmid in _dedupe_ids(pmids):
         rec = get_record(pmid) or {}
@@ -66,6 +66,7 @@ def _review_rows(pmids: List[str], gids: List[str]) -> List[Dict[str, str]]:
         study_design = (rec.get("study_design") or "").strip() or "—"
         rows.append(
             {
+                "Source": f"STUDY {idx}",
                 "Type": "Abstract",
                 "Title": title,
                 "Year": year,
@@ -74,6 +75,7 @@ def _review_rows(pmids: List[str], gids: List[str]) -> List[Dict[str, str]]:
                 "Study design": study_design,
             }
         )
+        idx += 1
 
     for gid in _dedupe_ids(gids):
         meta = get_guideline_meta(gid) or {}
@@ -81,6 +83,7 @@ def _review_rows(pmids: List[str], gids: List[str]) -> List[Dict[str, str]]:
         year = (meta.get("pub_year") or "").strip()
         rows.append(
             {
+                "Source": f"GUIDELINE {idx}",
                 "Type": "Guideline",
                 "Title": title,
                 "Year": year,
@@ -89,6 +92,7 @@ def _review_rows(pmids: List[str], gids: List[str]) -> List[Dict[str, str]]:
                 "Study design": "Guideline",
             }
         )
+        idx += 1
 
     return rows
 
@@ -255,12 +259,10 @@ def render() -> None:
 
     st.divider()
     st.markdown("### 3) Ask focused question")
-    focused_question_help = get_focused_question_instructions_text()
     prompt_text = st.text_input(
         "Focused question",
         placeholder="e.g., Does X improve Y in Z population?",
         key="meta_focused_question",
-        help=focused_question_help,
     )
 
     can_generate = bool(kept_pmids or kept_gids)
