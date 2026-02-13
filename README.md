@@ -19,5 +19,23 @@ For clinicians who love Pubmed, but hate having 37 tabs open and trying to track
 - **About**: This page.
 - **History**: In case you want to know when you fetched or uploaded something.
 
+## Workflows
+1. **Research a topic from one strong seed paper**
+   - Find a relevant article in PubMed and copy its PMID.
+   - Open **PMID → Abstract**, fetch the paper, review the extracted fields, and save it to your database.
+   - Use **PubMed Related articles** and **Semantic Scholar similar papers** to branch outward.
+   - Use the **Clipboard** expander to keep track of PMIDs you want to open next.
+   - Repeat with a new seed paper
+
+2. **Get up to date on recent research**
+   - Open **Search PubMed**.
+   - Review the ledger to see which month/specialty/journal combinations you already searched.
+   - Search uncovered gaps, then send promising papers to **PMID → Abstract** and save what matters. Clear what doesn't.
+
+3. **Answer a focused clinical question**
+   - Start in **Browse studies** and add relevant abstracts/guidelines to the evidence cart.
+   - Go to **Generate meta**, review the cart, and ask your focused question.
+   - Alternate path: start in **Generate meta** by adding an evidence folder first, then return to **Browse studies** to add more papers to the cart.
+
 ## Please note, the online version is a preview
 - Changes are not permanent and glitches are possible! But if you like the app or have any suggestions, I would love to hear about it! Thanks for checking it out! - Arjun

@@ -1,3 +1,6 @@
+import html
+from typing import Dict, List
+
 import requests
 import streamlit as st
 
@@ -22,6 +25,97 @@ from extract import (
     parse_year,
 )
 from pages_shared import _clean_pmid, _render_plain_text
+
+_RELATED_TRAY_KEY = "pmid_related_tray"
+
+
+def _get_related_tray() -> List[Dict[str, str]]:
+    raw = st.session_state.get(_RELATED_TRAY_KEY)
+    if not isinstance(raw, list):
+        raw = []
+
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for it in raw:
+        if not isinstance(it, dict):
+            continue
+        pmid = _clean_pmid(str(it.get("pmid") or ""))
+        if not pmid or pmid in seen:
+            continue
+        seen.add(pmid)
+        out.append(
+            {
+                "pmid": pmid,
+                "title": (it.get("title") or "").strip(),
+                "source": (it.get("source") or "").strip(),
+            }
+        )
+
+    st.session_state[_RELATED_TRAY_KEY] = out
+    return out
+
+
+def _add_related_pmid(pmid: str, title: str = "", source: str = "") -> bool:
+    pid = _clean_pmid(pmid)
+    if not pid:
+        return False
+
+    title = (title or "").strip()
+    source = (source or "").strip()
+    tray = _get_related_tray()
+
+    for it in tray:
+        if it.get("pmid") != pid:
+            continue
+        if title and not (it.get("title") or "").strip():
+            it["title"] = title
+        if source and not (it.get("source") or "").strip():
+            it["source"] = source
+        st.session_state[_RELATED_TRAY_KEY] = tray
+        return False
+
+    tray.append({"pmid": pid, "title": title, "source": source})
+    st.session_state[_RELATED_TRAY_KEY] = tray
+    return True
+
+
+def _render_related_tray() -> None:
+    tray = _get_related_tray()
+    with st.expander("Clipboard", expanded=bool(tray)):
+
+        if not tray:
+            st.info("No PMIDs in clipboard yet. Use the clipboard icon in the related-paper lists below.")
+            return
+
+        for it in tray:
+            pmid = (it.get("pmid") or "").strip()
+            if not pmid:
+                continue
+            title = (it.get("title") or "").strip() or f"PMID {pmid}"
+            st.markdown(f"- [{title}](https://pubmed.ncbi.nlm.nih.gov/{pmid}/) — `{pmid}`")
+
+        if st.button("Clear clipboard", key="pmid_related_tray_clear", width="stretch"):
+            st.session_state[_RELATED_TRAY_KEY] = []
+            st.rerun()
+
+
+def _render_related_item_row(pmid: str, title: str, source: str = "") -> None:
+    pid = _clean_pmid(pmid)
+    if not pid:
+        return
+    raw_title = (title or "").strip() or pid
+    safe_title = html.escape(raw_title)
+    source_key = "".join([ch if ch.isalnum() else "_" for ch in source]).strip("_") or "related"
+    c1, c2 = st.columns([18, 1], gap="small")
+    with c1:
+        st.markdown(
+            f"- <a href='https://pubmed.ncbi.nlm.nih.gov/{pid}/' target='_blank'>{safe_title}</a> — <code>{pid}</code>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        if st.button("📋", key=f"pmid_related_add_{source_key}_{pid}", help="Add PMID to clipboard", type="tertiary"):
+            _add_related_pmid(pid, raw_title, source=source)
+            st.rerun()
 
 
 def render() -> None:
@@ -287,8 +381,10 @@ def render() -> None:
                         st.info("No related articles returned.")
                     else:
                         for n in neighbors:
-                            st.markdown(
-                                f"- [{n['title'] or n['pmid']}](https://pubmed.ncbi.nlm.nih.gov/{n['pmid']}/) — `{n['pmid']}`"
+                            _render_related_item_row(
+                                n.get("pmid") or "",
+                                n.get("title") or n.get("pmid") or "",
+                                source="PubMed related",
                             )
                 except requests.HTTPError as e:
                     st.error(f"Neighbors lookup failed: {e}")
@@ -306,10 +402,16 @@ def render() -> None:
                                 p.get("pmid") or p.get("paperId") or "(no title)"
                             )
                             url = (p.get("url") or "").strip()
+                            pmid_from_s2 = _clean_pmid(str(p.get("pmid") or ""))
+                            if pmid_from_s2:
+                                _render_related_item_row(
+                                    pmid_from_s2,
+                                    title,
+                                    source="Semantic Scholar related",
+                                )
+                                continue
                             tag = ""
-                            if (p.get("pmid") or "").strip():
-                                tag = f" — `{p['pmid']}`"
-                            elif (p.get("paperId") or "").strip():
+                            if (p.get("paperId") or "").strip():
                                 tag = f" — `{p['paperId']}`"
                             if url:
                                 st.markdown(f"- [{title}]({url}){tag}")
@@ -321,6 +423,8 @@ def render() -> None:
                     st.error(f"Semantic Scholar lookup failed: {e}")
                 except Exception as e:
                     st.error(f"Semantic Scholar lookup error: {e}")
+
+            _render_related_tray()
 
         with right:
             cerr = (st.session_state.get("gpt_conclusions_error") or "").strip()
