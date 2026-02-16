@@ -100,6 +100,26 @@ SPECIALTY_JOURNAL_TERMS = {
     },
 }
 
+SPECIALTY_LEDGER_BG_COLORS = {
+    "general": "#fff4d6",
+    "internal medicine": "#dff4ff",
+    "neurology": "#e6ebff",
+    "critical care": "#ffe2e2",
+    "cardiology": "#fde3ec",
+    "infectious disease": "#e5ffe8",
+    "pulmonology": "#dffaf5",
+    "surgery": "#ffe9db",
+    "psychiatry": "#f0e8ff",
+    "gastroenterology": "#fff1d9",
+    "emergency medicine": "#ffe8cc",
+    "nephrology": "#e5f0ff",
+    "endocrinology/diabetes": "#fff2c2",
+    "hematology": "#ffe7f0",
+    "oncology": "#ffe2ea",
+    "rheumatology": "#f3ecff",
+    "hepatology": "#fef3d7",
+}
+
 
 def _infer_specialty_from_journal_label(journal_label: str) -> str:
     jl = (journal_label or "").strip().lower()
@@ -110,6 +130,12 @@ def _infer_specialty_from_journal_label(journal_label: str) -> str:
             if jl == (label or "").strip().lower():
                 return specialty
     return "—"
+
+
+def _specialty_cell_style(value: object) -> str:
+    specialty = str(value or "").strip().lower()
+    bg = SPECIALTY_LEDGER_BG_COLORS.get(specialty, "#f3f4f6")
+    return f"background-color: {bg}; color: #1f2937; font-weight: 600;"
 
 
 def _run_search_page(
@@ -498,7 +524,8 @@ def _render_search_ledger() -> None:
     df = pd.DataFrame(display_rows)
     if not df.empty:
         df = df[cols]
-    st.dataframe(df, hide_index=True, width='stretch')
+    styled = df.style.map(_specialty_cell_style, subset=["Specialty"])
+    st.dataframe(styled, hide_index=True, width="stretch")
 
 
 def render() -> None:
