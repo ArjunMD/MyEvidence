@@ -317,111 +317,232 @@ def _merge_cleared_all_rows(table_rows: List[Dict[str, object]]) -> List[Dict[st
     return out
 
 
+def _month_idx_from_ym(ym: Tuple[int, int]) -> int:
+    return int(ym[0]) * 12 + int(ym[1])
+
+
+def _ym_from_month_idx(month_idx: int) -> Tuple[int, int]:
+    yy = int(month_idx) // 12
+    mm = int(month_idx) % 12
+    if mm == 0:
+        yy -= 1
+        mm = 12
+    return (yy, mm)
+
+
+def _month_label_from_month_idx(month_idx: int) -> str:
+    yy, mm = _ym_from_month_idx(month_idx)
+    return f"{calendar.month_name[int(mm)]} {int(yy)}"
+
+
+def _month_ranges(month_values: set[int]) -> List[Tuple[int, int]]:
+    if not month_values:
+        return []
+    vals = sorted(int(v) for v in month_values)
+    out: List[Tuple[int, int]] = []
+    start = vals[0]
+    end = vals[0]
+    for cur in vals[1:]:
+        if cur == (end + 1):
+            end = cur
+            continue
+        out.append((start, end))
+        start = cur
+        end = cur
+    out.append((start, end))
+    return out
+
+
+def _month_range_label(start_month_idx: int, end_month_idx: int, latest_clearable_month_idx: Optional[int]) -> str:
+    start_label = _month_label_from_month_idx(start_month_idx)
+    if int(start_month_idx) == int(end_month_idx):
+        return start_label
+    if latest_clearable_month_idx is not None and int(end_month_idx) == int(latest_clearable_month_idx):
+        return f"{start_label} to present"
+    end_label = _month_label_from_month_idx(end_month_idx)
+    return f"{start_label} to {end_label}"
+
+
+def _configured_journal_keys_for_specialty(specialty_key: str) -> set[str]:
+    skey = (specialty_key or "").strip().lower()
+    if not skey:
+        return set()
+    for specialty, journals in SPECIALTY_JOURNAL_TERMS.items():
+        if skey == (specialty or "").strip().lower():
+            return {
+                (label or "").strip().lower()
+                for label in journals.keys()
+                if (label or "").strip()
+            }
+    return set()
+
+
 def _merge_consecutive_cleared_all_rows(table_rows: List[Dict[str, object]], today) -> List[Dict[str, object]]:
     """
-    Second rule:
-    For rows with Status=Cleared and Study type=All, merge consecutive months for the
-    same specialty + journal into one row. Month label becomes "First month to Last month",
-    or "First month to present" when the run ends at the latest clearable month.
+    Consolidate cleared Study type=All rows in two passes:
+    1) Merge consecutive months per specialty + journal.
+    2) Add specialty-level "All journals" ranges where all configured journals in the
+       specialty are cleared for the same months.
+
+    Journal-level rows are hidden only when their full month range is already covered by
+    the specialty-level "All journals" range.
     """
-    groups: Dict[Tuple[str, str], List[Tuple[int, Dict[str, object], int]]] = {}
-    last_clearable_ym = _latest_clearable_year_month(today=today)
-    for idx, row in enumerate(table_rows):
+    passthrough_rows: List[Dict[str, object]] = []
+    month_rows: List[Dict[str, object]] = []
+
+    for row in table_rows:
         if (row.get("Status") or "") != "Cleared":
+            passthrough_rows.append(row)
             continue
         if str(row.get("Study type") or "").strip().lower() != "all":
+            passthrough_rows.append(row)
             continue
         ym = _parse_year_month_key(str(row.get("_ym_raw") or ""))
         if ym is None:
+            passthrough_rows.append(row)
             continue
-        month_idx = int(ym[0]) * 12 + int(ym[1])
-        skey = str(row.get("Specialty") or "").strip().lower()
-        jkey = str(row.get("Journal") or "").strip().lower()
-        groups.setdefault((skey, jkey), []).append((idx, row, month_idx))
+        month_rows.append(row)
 
-    to_remove: set[int] = set()
+    if not month_rows:
+        return table_rows
+
+    latest_clearable = _latest_clearable_year_month(today=today)
+    latest_clearable_month_idx = (
+        _month_idx_from_ym(latest_clearable) if latest_clearable is not None else None
+    )
+
+    spec_label_by_key: Dict[str, str] = {}
+    journal_label_by_key: Dict[Tuple[str, str], str] = {}
+    journal_months: Dict[Tuple[str, str], set[int]] = {}
+    journal_month_totals: Dict[Tuple[str, str, int], Tuple[int, int]] = {}
+
+    for row in month_rows:
+        ym = _parse_year_month_key(str(row.get("_ym_raw") or ""))
+        if ym is None:
+            continue
+        month_idx = _month_idx_from_ym(ym)
+        spec_label = str(row.get("Specialty") or "—").strip() or "—"
+        journal_label = str(row.get("Journal") or "—").strip() or "—"
+        spec_key = spec_label.lower()
+        journal_key = journal_label.lower()
+
+        spec_label_by_key.setdefault(spec_key, spec_label)
+        journal_label_by_key.setdefault((spec_key, journal_key), journal_label)
+        journal_months.setdefault((spec_key, journal_key), set()).add(month_idx)
+
+        k = (spec_key, journal_key, month_idx)
+        prev_visible, prev_total = journal_month_totals.get(k, (0, 0))
+        journal_month_totals[k] = (
+            int(prev_visible) + _safe_int(row.get("_visible_matches"), 0),
+            int(prev_total) + _safe_int(row.get("_total_matches"), 0),
+        )
+
+    specialty_keys = {spec for spec, _ in journal_months.keys()}
+    specialty_all_months: Dict[str, set[int]] = {}
+    specialty_required_journals: Dict[str, set[str]] = {}
+
+    for spec_key in specialty_keys:
+        present_journals = {
+            journal_key
+            for s_key, journal_key in journal_months.keys()
+            if s_key == spec_key
+        }
+        configured_journals = _configured_journal_keys_for_specialty(spec_key)
+        required_journals = configured_journals if configured_journals else present_journals
+        specialty_required_journals[spec_key] = set(required_journals)
+
+        if not required_journals:
+            specialty_all_months[spec_key] = set()
+            continue
+
+        common: Optional[set[int]] = None
+        for journal_key in required_journals:
+            months = set(journal_months.get((spec_key, journal_key), set()))
+            if common is None:
+                common = months
+            else:
+                common = common.intersection(months)
+        specialty_all_months[spec_key] = set(common or set())
+
     merged_rows: List[Dict[str, object]] = []
 
-    for _, items in groups.items():
-        if len(items) < 2:
-            continue
-        items_sorted = sorted(items, key=lambda x: x[2])  # oldest -> newest
-
-        run: List[Tuple[int, Dict[str, object], int]] = [items_sorted[0]]
-        for cur in items_sorted[1:]:
-            prev = run[-1]
-            if cur[2] == (prev[2] + 1):
-                run.append(cur)
+    for (spec_key, journal_key), month_set in journal_months.items():
+        month_ranges = _month_ranges(month_set)
+        specialty_month_set = specialty_all_months.get(spec_key, set())
+        for start_month_idx, end_month_idx in month_ranges:
+            fully_covered = all(
+                int(mm) in specialty_month_set
+                for mm in range(int(start_month_idx), int(end_month_idx) + 1)
+            )
+            if fully_covered:
                 continue
 
-            if len(run) >= 2:
-                run_rows = [r for _, r, _ in run]
-                first_row = run_rows[0]
-                last_row = run_rows[-1]
-                visible_total = sum(_safe_int(r.get("_visible_matches"), 0) for r in run_rows)
-                match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in run_rows)
-                last_ym = _parse_year_month_key(str(last_row.get("_ym_raw") or ""))
-                if last_clearable_ym is not None and last_ym == last_clearable_ym:
-                    month_label = f"{first_row.get('Month') or '—'} to present"
-                else:
-                    month_label = f"{first_row.get('Month') or '—'} to {last_row.get('Month') or '—'}"
+            visible_total = 0
+            match_total = 0
+            for mm in range(int(start_month_idx), int(end_month_idx) + 1):
+                vis, tot = journal_month_totals.get((spec_key, journal_key, int(mm)), (0, 0))
+                visible_total += int(vis)
+                match_total += int(tot)
 
-                merged_rows.append(
-                    {
-                        "Specialty": last_row.get("Specialty") or "—",
-                        "Journal": last_row.get("Journal") or "—",
-                        "Study type": "All",
-                        "Month": month_label,
-                        "Status": "Cleared",
-                        "Visible / Total": f"{visible_total}/{match_total}",
-                        "_status_rank": last_row.get("_status_rank"),
-                        "_ym_sort": last_row.get("_ym_sort"),
-                        "_ym_raw": last_row.get("_ym_raw"),
-                        "_visible_matches": visible_total,
-                        "_total_matches": match_total,
-                    }
-                )
-                to_remove.update(idx for idx, _, _ in run)
-
-            run = [cur]
-
-        if len(run) >= 2:
-            run_rows = [r for _, r, _ in run]
-            first_row = run_rows[0]
-            last_row = run_rows[-1]
-            visible_total = sum(_safe_int(r.get("_visible_matches"), 0) for r in run_rows)
-            match_total = sum(_safe_int(r.get("_total_matches"), 0) for r in run_rows)
-            last_ym = _parse_year_month_key(str(last_row.get("_ym_raw") or ""))
-            if last_clearable_ym is not None and last_ym == last_clearable_ym:
-                month_label = f"{first_row.get('Month') or '—'} to present"
-            else:
-                month_label = f"{first_row.get('Month') or '—'} to {last_row.get('Month') or '—'}"
-
+            end_ym = _ym_from_month_idx(end_month_idx)
+            month_label = _month_range_label(
+                start_month_idx=start_month_idx,
+                end_month_idx=end_month_idx,
+                latest_clearable_month_idx=latest_clearable_month_idx,
+            )
             merged_rows.append(
                 {
-                    "Specialty": last_row.get("Specialty") or "—",
-                    "Journal": last_row.get("Journal") or "—",
+                    "Specialty": spec_label_by_key.get(spec_key, "—"),
+                    "Journal": journal_label_by_key.get((spec_key, journal_key), "—"),
                     "Study type": "All",
                     "Month": month_label,
                     "Status": "Cleared",
                     "Visible / Total": f"{visible_total}/{match_total}",
-                    "_status_rank": last_row.get("_status_rank"),
-                    "_ym_sort": last_row.get("_ym_sort"),
-                    "_ym_raw": last_row.get("_ym_raw"),
+                    "_status_rank": 2,
+                    "_ym_sort": int(end_ym[0]) * 100 + int(end_ym[1]),
+                    "_ym_raw": f"{int(end_ym[0])}-{int(end_ym[1]):02d}",
                     "_visible_matches": visible_total,
                     "_total_matches": match_total,
                 }
             )
-            to_remove.update(idx for idx, _, _ in run)
 
-    if not merged_rows:
-        return table_rows
-
-    out: List[Dict[str, object]] = []
-    for idx, row in enumerate(table_rows):
-        if idx in to_remove:
+    for spec_key, common_months in specialty_all_months.items():
+        required_journals = specialty_required_journals.get(spec_key, set())
+        if not common_months or not required_journals:
             continue
-        out.append(row)
+        month_ranges = _month_ranges(common_months)
+        for start_month_idx, end_month_idx in month_ranges:
+            visible_total = 0
+            match_total = 0
+            for mm in range(int(start_month_idx), int(end_month_idx) + 1):
+                for journal_key in required_journals:
+                    vis, tot = journal_month_totals.get((spec_key, journal_key, int(mm)), (0, 0))
+                    visible_total += int(vis)
+                    match_total += int(tot)
+
+            end_ym = _ym_from_month_idx(end_month_idx)
+            month_label = _month_range_label(
+                start_month_idx=start_month_idx,
+                end_month_idx=end_month_idx,
+                latest_clearable_month_idx=latest_clearable_month_idx,
+            )
+            merged_rows.append(
+                {
+                    "Specialty": spec_label_by_key.get(spec_key, "—"),
+                    "Journal": "All journals",
+                    "Study type": "All",
+                    "Month": month_label,
+                    "Status": "Cleared",
+                    "Visible / Total": f"{visible_total}/{match_total}",
+                    "_status_rank": 2,
+                    "_ym_sort": int(end_ym[0]) * 100 + int(end_ym[1]),
+                    "_ym_raw": f"{int(end_ym[0])}-{int(end_ym[1]):02d}",
+                    "_visible_matches": visible_total,
+                    "_total_matches": match_total,
+                }
+            )
+
+    out = list(passthrough_rows)
     out.extend(merged_rows)
     return out
 
@@ -564,7 +685,10 @@ def render() -> None:
 
     c3, c4 = st.columns(2)
     with c3:
-        specialty_options = list(SPECIALTY_JOURNAL_TERMS.keys())
+        specialty_options = sorted(
+            SPECIALTY_JOURNAL_TERMS.keys(),
+            key=lambda s: (0 if str(s or "").strip().lower() == "general" else 1, str(s or "").lower()),
+        )
         sticky_specialty = (sticky.get("specialty") or "").strip()
         specialty_default_idx = (
             specialty_options.index(sticky_specialty)
