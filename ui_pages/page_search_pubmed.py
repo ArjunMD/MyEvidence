@@ -551,7 +551,7 @@ def _render_search_ledger() -> None:
     st.markdown("##### Ledger")
     st.caption("Entries are eligible to clear 30 days after month-end.")
     today = datetime.now(timezone.utc).date()
-    rows = list_search_pubmed_ledger(limit=300)
+    rows = list_search_pubmed_ledger()
     if not rows:
         st.caption("No ledger entries yet.")
         return

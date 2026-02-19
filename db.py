@@ -274,10 +274,9 @@ def upsert_search_pubmed_ledger(
         )
 
 
-def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
+def list_search_pubmed_ledger(limit: Optional[int] = None) -> List[Dict[str, str]]:
     with _connect_db() as conn:
-        rows = conn.execute(
-            """
+        query = """
             SELECT
                 year_month,
                 specialty_label,
@@ -296,10 +295,17 @@ def list_search_pubmed_ledger(limit: int = 100) -> List[Dict[str, str]]:
                 study_type_label COLLATE NOCASE ASC,
                 CAST(SUBSTR(year_month, 1, 4) AS INTEGER) DESC,
                 CAST(SUBSTR(year_month, 6, 2) AS INTEGER) ASC
-            LIMIT ?;
-            """,
-            (max(1, int(limit or 100)),),
-        ).fetchall()
+        """
+        params: Tuple[object, ...] = ()
+        try:
+            lim = int(limit) if limit is not None else 0
+        except Exception:
+            lim = 0
+        if lim > 0:
+            query += "\n            LIMIT ?"
+            params = (lim,)
+        query += ";"
+        rows = conn.execute(query, params).fetchall()
 
     out: List[Dict[str, str]] = []
     for r in rows:
