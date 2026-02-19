@@ -962,16 +962,17 @@ def _openai_global_repeat_post_pass(
     recs: List[Dict[str, str]],
     i_to_section: Dict[int, str],
     progress_cb=None,
-) -> Set[int]:
+) -> Dict[int, int]:
     """
     Global post-pass for repeats:
     - works in original recommendation order (lower i appears earlier in source)
     - only marks *later* recommendations as repeats
     - skips items already in "Possible repeats"
+    Returns mapping: later_recommendation_i -> earlier_recommendation_i
     """
     key = _openai_api_key()
     if not key:
-        return set()
+        return {}
 
     check_items: List[Dict] = []
     ii = 0
@@ -986,7 +987,7 @@ def _openai_global_repeat_post_pass(
         check_items.append({"i": ii, "text": _truncate_for_prompt(txt, 1200)})
 
     if len(check_items) < 2:
-        return set()
+        return {}
 
     def _progress(done=0, total=0, msg="", detail=""):
         if not progress_cb:
@@ -1017,7 +1018,7 @@ def _openai_global_repeat_post_pass(
 
     batches = _chunk_recs_for_classification(check_items, max_chars=10000, max_items=28)
     total_batches = len(batches)
-    repeat_i: Set[int] = set()
+    repeat_map: Dict[int, int] = {}
     canonical_prior: List[Dict] = []
 
     _progress(
@@ -1106,7 +1107,7 @@ def _openai_global_repeat_post_pass(
                 continue
 
         valid_context_ids = prior_i_set | batch_i_set
-        proposed: Set[int] = set()
+        proposed: Dict[int, int] = {}
 
         for oi in out_items:
             if not isinstance(oi, dict):
@@ -1122,14 +1123,16 @@ def _openai_global_repeat_post_pass(
                 continue
             if dup_of >= i_val:
                 continue
-            proposed.add(i_val)
+            prev = proposed.get(i_val)
+            if prev is None or dup_of < prev:
+                proposed[i_val] = dup_of
 
         for b in batch_payload:
             i_val = int(b.get("i") or 0)
             if i_val <= 0:
                 continue
             if i_val in proposed:
-                repeat_i.add(i_val)
+                repeat_map[i_val] = int(proposed.get(i_val) or 0)
                 continue
             canonical_prior.append({"i": i_val, "text": (b.get("text") or "")})
 
@@ -1137,10 +1140,10 @@ def _openai_global_repeat_post_pass(
             bi,
             max(1, total_batches),
             msg="Step 4/4 — Global repeat post-pass…",
-            detail=f"Finished repeat batch {bi}/{total_batches} • {len(repeat_i)} marked",
+            detail=f"Finished repeat batch {bi}/{total_batches} • {len(repeat_map)} marked",
         )
 
-    return repeat_i
+    return repeat_map
 
 
 def gpt_generate_guideline_recommendations_display(
@@ -1192,6 +1195,7 @@ def gpt_generate_guideline_recommendations_display(
         "- If none fit, place in 'Other'.\n"
         "- A note about the 'Disposition' section: This refers to just after initial evaluaion. I.e., whether the patient should be discharged from the emergency department, admitted to the a hospital floor, or admitted to the intensive care unit (or sometimes other options as well).\n"
         "- A note about the 'Possible repeats' section: use this if a later recommendation appears to be a duplicate or near-duplicate, either semantically or literally, of an earlier recommendation in the guideline. This overrides categorizing it somewhere else.\n"
+        "- If near-duplicates differ only because one has explicit strength/evidence and the other does not, keep the one with explicit strength/evidence in the clinical section and place the ungraded one in 'Possible repeats'.\n"
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 
@@ -1263,14 +1267,57 @@ def gpt_generate_guideline_recommendations_display(
             detail=f"Finished batch {ci}/{total_chunks}",
         )
 
-    repeat_overrides: Set[int] = set()
+    rec_has_grade_signal: Dict[int, bool] = {}
+    ii_grade = 0
+    for r in recs or []:
+        txt = (r.get("recommendation_text") or "").strip()
+        if not txt:
+            continue
+        ii_grade += 1
+        strength = _sanitize_guideline_attr_value(r.get("strength_raw") or "")
+        evidence = _sanitize_guideline_attr_value(r.get("evidence_raw") or "")
+        rec_has_grade_signal[ii_grade] = bool(strength or evidence)
+
+    repeat_overrides: Dict[int, int] = {}
     try:
         repeat_overrides = _openai_global_repeat_post_pass(recs, i_to_section, progress_cb=_progress)
     except Exception:
-        repeat_overrides = set()
+        repeat_overrides = {}
 
-    for i_repeat in repeat_overrides:
-        i_to_section[i_repeat] = "Possible repeats"
+    if repeat_overrides:
+        pre_repeat_sections = {
+            int(i): _safe_section_label(sec)
+            for i, sec in i_to_section.items()
+        }
+
+        final_repeats: Set[int] = set()
+        keep_later_real: Dict[int, int] = {}
+
+        for later_i, earlier_i in sorted(repeat_overrides.items(), key=lambda kv: kv[0]):
+            earlier_has_grade = bool(rec_has_grade_signal.get(int(earlier_i), False))
+            later_has_grade = bool(rec_has_grade_signal.get(int(later_i), False))
+
+            # If the earlier copy is ungraded but the later copy has explicit strength/evidence,
+            # keep the later one in a real category and move the earlier one to Possible repeats.
+            if (not earlier_has_grade) and later_has_grade:
+                final_repeats.add(int(earlier_i))
+                keep_later_real[int(later_i)] = int(earlier_i)
+            else:
+                final_repeats.add(int(later_i))
+
+        for i_repeat in final_repeats:
+            i_to_section[i_repeat] = "Possible repeats"
+
+        for later_i, earlier_i in keep_later_real.items():
+            if later_i in final_repeats:
+                continue
+            sec_now = _safe_section_label(i_to_section.get(later_i, "Other"))
+            if sec_now != "Possible repeats":
+                continue
+            fallback = _safe_section_label(pre_repeat_sections.get(earlier_i, "Other"))
+            if fallback == "Possible repeats":
+                fallback = "Other"
+            i_to_section[later_i] = fallback
 
     _progress(
         max(1, total_chunks),
