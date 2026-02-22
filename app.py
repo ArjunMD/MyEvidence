@@ -16,6 +16,7 @@ from ui_pages.page_generate_meta import render as render_generate_meta
 from ui_pages.page_guidelines import render as render_guidelines
 from ui_pages.page_history import render as render_history
 from ui_pages.page_pmid_abstract import render as render_pmid_abstract
+from ui_pages.page_rrt_meds import render as render_rrt_meds
 from ui_pages.page_search_pubmed import render as render_search_pubmed
 from pages_shared import (
     _add_to_evidence_cart,
@@ -136,6 +137,7 @@ page = st.sidebar.radio(
         "Delete",
         "About",
         "History",
+        "RRT meds",
     ],
     index=0,
     key="nav_page",
@@ -165,3 +167,5 @@ elif page == "About":
     render_about()
 elif page == "History":
     render_history()
+elif page == "RRT meds":
+    render_rrt_meds()
