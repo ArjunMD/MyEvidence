@@ -48,15 +48,15 @@ def render() -> None:
         "Adult emergency quick reference only. Use institutional protocols, pharmacy guidance, and clinical judgment."
     )
 
-    brady = RRT_MED_GUIDE.get("Bradycardia") or {}
-    with st.expander("Bradycardia", expanded=False):
-        blocks = []
-        items = brady.get("medications") or []
-        for item in items:
-            name = str(item.get("name") or "").strip() or "Item"
-            if str(item.get("item_type") or "").strip().lower() == "procedure":
-                blocks.append(_build_procedure_block(name, item))
-            else:
-                blocks.append(_build_medication_block(name, item))
-        if blocks:
-            st.markdown("\n\n".join(blocks))
+    for rrt_name, rrt_data in RRT_MED_GUIDE.items():
+        with st.expander(rrt_name, expanded=False):
+            blocks = []
+            items = rrt_data.get("medications") or []
+            for item in items:
+                name = str(item.get("name") or "").strip() or "Item"
+                if str(item.get("item_type") or "").strip().lower() == "procedure":
+                    blocks.append(_build_procedure_block(name, item))
+                else:
+                    blocks.append(_build_medication_block(name, item))
+            if blocks:
+                st.markdown("\n\n".join(blocks))

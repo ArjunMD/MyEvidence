@@ -22,7 +22,7 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                 "fun_fact": "The name comes from Atropa belladonna (Nightshade); Belladonna named because Cleopatra used the eye drops for pupil dilation as a beauty product.",
             },
             {
-                "name": "Temporary pacing",
+                "name": "Temporary pacing (transcutaneous/transvenous)",
                 "item_type": "procedure",
                 "summary": "Start transcutaneous pacing immediately while preparing medications.",
                 "steps": [
@@ -46,6 +46,50 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                 "item_type": "medication",
                 "dose": "1g CaCl (CVC) or 3g CaGluc (PIV). If HyperK can consider redosing. iSTAT might be helpful.",
                 "comments": "Calcium-responsive bradycardias: HyperK, HypoCa, HyperMg, CCB, BB",
+            },
+        ],
+    },
+    "Active Ongoing Seizure": {
+        "medications": [
+            {
+                "name": "Lorazepam",
+                "item_type": "medication",
+                "dose": "4 mg IV over 2 minutes; may repeat once in 5-10 minutes. 0.1 mg/kg, maximum rate 2 mg/min is also okay.",
+                "onset_peak_duration": "Onset 1-3 minutes IV; peak 5-15 minutes; anticonvulsant effect usually several hours.",
+            },
+            {
+                "name": "Midazolam (if no IV)",
+                "item_type": "medication",
+                "dose": "10 mg IM once (or 10 mg IN/IV).",
+                "onset_peak_duration": "IM onset about 5-10 minutes (faster IV/IN).",
+            },
+            {
+                "name": "Levetiracetam",
+                "item_type": "medication",
+                "dose": "If seizures still present, give 60 mg/kg, max 4500 mg, infuse over 10 minutes.",
+                "comments": "Give it whenever it arrives but move on to next steps.",
+            },
+            {
+                "name": "D50",
+                "item_type": "medication",
+                "comments": "Don't forget to check glucose",
+            },
+            {
+                "name": "Hypertonic sodium bicarbonate",
+                "item_type": "medication",
+                "dose": "2 ampules (100 mEq) of 1 mEq/ml concentration",
+                "comments": "Hyponatremia is an uncommon cause of seizures but needs immediate treatment if present",
+            },
+            {
+                "name": "Thiamine",
+                "item_type": "medication",
+                "comments": "Known cause of seizures. When in doubt. OK to give.",
+            },
+            {
+                "name": "Ketamine",
+                "item_type": "medication",
+                "dose": "1 mg/kg slow IV push over 2 minutes",
+                "comments": "When you are thinking about ketamine you are in intubation territory. Call for propofol gtt or midazolam bolus + gtt, paralytic, and norepinephrine",
             },
         ],
     },
