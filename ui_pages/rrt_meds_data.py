@@ -41,6 +41,12 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                 "contra": "None.",
                 "comments": "If epinephrine not available, put a vial of cardiac epinephrine in 1L NS, mix the bag, and run it at 120 mL/hr - 600 ml/hr to approximate 2-10 mcg/min.",
             },
+            {
+                "name": "Calcium",
+                "item_type": "medication",
+                "dose": "1g CaCl (CVC) or 3g CaGluc (PIV). If HyperK can consider redosing. iSTAT might be helpful.",
+                "comments": "Calcium-responsive bradycardias: HyperK, HypoCa, HyperMg, CCB, BB",
+            },
         ],
     },
 }
