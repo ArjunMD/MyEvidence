@@ -47,6 +47,9 @@ def render() -> None:
     st.caption(
         "Adult emergency quick reference only. Use institutional protocols, pharmacy guidance, and clinical judgment."
     )
+    with st.expander("Extensions", expanded=False):
+        st.markdown("- Telemetry: `8944`")
+        st.markdown("- Radiology: `5244`")
 
     for rrt_name, rrt_data in RRT_MED_GUIDE.items():
         with st.expander(rrt_name, expanded=False):

@@ -93,6 +93,78 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
             },
         ],
     },
+    "Anaphylaxis": {
+        "medications": [
+            {
+                "name": "Immediate actions",
+                "item_type": "procedure",
+                "steps": [
+                    "Ask patient to speak their name to assess for stridor. If stridor, prepare to establish an airway.",
+                    "All steps happen simultaneously, including the below actions, epinephrine, and airway management.",
+                    "Stop any infusions. Establish IV/IO access.",
+                    "Give HFNC or NRB, place on monitor, and establish IV/IO access.",
+                    "Lay patient supine with legs elevated (or left lateral if vomiting/pregnant); avoid sudden upright posture (empty ventricle syndrome)",
+                    "Give epinephrine at the earliest opportunity. (Better outcomes)",
+                    "Give 1-2L rapid fluids ASAP.",
+                    "Rapid airway assessment and get the most experienced intubator around, prepare for emergency cricothyrotomy and have an extraglottic backup.",
+                    "Check serum tryptase in addition to normal labs",
+                ],
+                "cautions": "Skin findings can be absent in severe reactions; treat airway/breathing/circulation compromise as anaphylaxis.",
+            },
+            {
+                "name": "Emergency cricothyrotomy (CICO rescue airway)",
+                "item_type": "procedure",
+                "summary": "If cannot intubate/cannot oxygenate with worsening hypoxemia, move early to front-of-neck access.",
+                "steps": [
+                    "Landmarks (laryngeal handshake): palpate hyoid, thyroid cartilage, then cricothyroid membrane (CTM) between thyroid and cricoid; stabilize the larynx with non-dominant hand.",
+                    "Equipment: #10 (or similarly wide) scalpel, bougie (coudé tip), suction, and a lubricated cuffed tube (often size 6.0).",
+                    "If CTM palpable: make a transverse stab through skin + CTM, rotate blade 90 degrees with sharp edge caudad, and use the blade as a hook to keep the opening patent.",
+                    "If CTM impalpable: make a large vertical midline skin incision, use blunt finger dissection to identify/stabilize laryngeal structures, then perform the transverse CTM stab.",
+                    "Advance bougie gently into trachea along the blade/finger track; it should pass without fixed resistance. If resistance is met, do not force - withdraw slightly and redirect.",
+                    "Railroad a lubricated cuffed tracheostomy tube (or a 6.0 cuffed ETT per local kit) over the bougie into the trachea, then remove bougie.",
+                    "Inflate cuff, ventilate, confirm with continuous waveform capnography + chest rise, and secure tube.",
+                ],
+                "cautions": "Last-resort airway procedure. Keep oxygen delivery attempts ongoing during setup and follow local difficult-airway protocol.",
+            },
+            {
+                "name": "Epinephrine (IM) - first line",
+                "item_type": "medication",
+                "dose": "0.5 mg IM (0.5 mL of 1 mg/mL [1:1000]) into anterolateral thigh; repeat every 5 minutes as needed.",
+                "mechanism": "Alpha-1 vasoconstriction reduces edema/hypotension, beta-1 supports cardiac output, and beta-2 bronchodilates/reduces mediator release.",
+            },
+            {
+                "name": "Epinephrine infusion (refractory symptoms)",
+                "item_type": "medication",
+                "dose": "If persistent respiratory/circulatory compromise after 2 IM doses + fluids, start IV epinephrine infusion (e.g., 0.05-0.1 mcg/kg/min and titrate).",
+            },
+            {
+                "name": "Nebulized albuterol (salbutamol)",
+                "item_type": "medication",
+                "dose": "5 mg nebulized for persistent bronchospasm/wheezing after epinephrine.",
+                "comments": "Adjunct only; never replace epinephrine with bronchodilator alone.",
+            },
+            {
+                "name": "Glucagon (beta-blocker use, refractory hypotension/bradycardia)",
+                "item_type": "medication",
+                "dose": "1 to 5 mg IV over 5 minutes, then infusion 5-15 mcg/min if needed.",
+                "mechanism": "Improves inotropy/chronotropy via non-beta receptor pathway.",
+            },
+            {
+                "name": "Antihistamines and corticosteroids (adjuncts only)",
+                "item_type": "medication",
+                "dose": "Consider only after stabilization, mainly for persistent skin symptoms or refractory/protracted reaction per protocol.",
+                "mechanism": "May improve cutaneous symptoms; delayed onset.",
+            },
+            {
+                "name": "Observation and disposition",
+                "item_type": "procedure",
+                "steps": [
+                    "Observe for biphasic recurrence based on severity/risk factors and local protocol.",
+                    "AEdit allergy list",
+                ],
+            },
+        ],
+    },
     "Code Stroke": {
     "medications": [
         {
