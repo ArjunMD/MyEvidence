@@ -221,7 +221,7 @@ def _latest_clearable_year_month(today) -> Optional[Tuple[int, int]]:
     """
     yy = int(today.year)
     mm = int(today.month)
-    for _ in range(0, 2400):
+    for _ in range(24):
         ym = f"{yy:04d}-{mm:02d}"
         if _is_year_month_clearable(ym, today=today):
             return (yy, mm)
@@ -823,17 +823,20 @@ def render() -> None:
     is_time_clearable = _is_year_month_clearable(ym_key, today=today)
     is_cleared = bool(visible_count == 0 and is_verified and is_time_clearable)
     if not _is_future_year_month(ym_key, today=today):
-        upsert_search_pubmed_ledger(
-            year_month=ym_key,
-            specialty_label=specialty_label,
-            journal_label=journal_label,
-            study_type_label=study_type_label or LEDGER_STUDY_TYPE_LABEL,
-            total_matches=total_count,
-            visible_matches=visible_count,
-            hidden_matches=hidden_count,
-            is_cleared=is_cleared,
-            is_verified=is_verified,
-        )
+        try:
+            upsert_search_pubmed_ledger(
+                year_month=ym_key,
+                specialty_label=specialty_label,
+                journal_label=journal_label,
+                study_type_label=study_type_label or LEDGER_STUDY_TYPE_LABEL,
+                total_matches=total_count,
+                visible_matches=visible_count,
+                hidden_matches=hidden_count,
+                is_cleared=is_cleared,
+                is_verified=is_verified,
+            )
+        except Exception as e:
+            st.error(f"Failed to update search ledger: {e}")
 
     if total_count > int(SEARCH_FETCH_LIMIT):
         st.warning(
@@ -862,7 +865,10 @@ def render() -> None:
                         key=f"search_pubmed_hide_{pmid}",
                         use_container_width=True,
                     ):
-                        hide_pubmed_pmid(pmid)
+                        try:
+                            hide_pubmed_pmid(pmid)
+                        except Exception as e:
+                            st.error(f"Failed to hide PMID {pmid}: {e}")
                         st.rerun()
                 with b2:
                     if st.button(

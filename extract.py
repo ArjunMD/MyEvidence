@@ -628,6 +628,27 @@ def _openai_api_key() -> str:
         pass
 
 
+def _require_openai_api_key() -> str:
+    """Return the OpenAI API key or raise a clear RuntimeError."""
+    key = _openai_api_key()
+    if not key:
+        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    return key
+
+
+def _call_progress(progress_cb, done=0, total=0, msg="", detail=""):
+    """Invoke an optional progress callback, tolerating varied signatures."""
+    if not progress_cb:
+        return
+    try:
+        progress_cb(done, total, msg=msg, detail=detail)
+    except TypeError:
+        try:
+            progress_cb(done, total, msg or detail or "")
+        except TypeError:
+            progress_cb(done, total)
+
+
 def _openai_model() -> str:
     return ("gpt-5.2")
 
@@ -989,17 +1010,6 @@ def _openai_global_repeat_post_pass(
     if len(check_items) < 2:
         return {}
 
-    def _progress(done=0, total=0, msg="", detail=""):
-        if not progress_cb:
-            return
-        try:
-            progress_cb(done, total, msg=msg, detail=detail)
-        except TypeError:
-            try:
-                progress_cb(done, total, msg or detail or "")
-            except TypeError:
-                progress_cb(done, total)
-
     instructions = (
         "You are running a global post-pass to detect later duplicate/near-duplicate guideline recommendations.\n"
         "Return ONLY valid JSON with this exact shape:\n"
@@ -1021,7 +1031,7 @@ def _openai_global_repeat_post_pass(
     repeat_map: Dict[int, int] = {}
     canonical_prior: List[Dict] = []
 
-    _progress(
+    _call_progress(progress_cb,
         0,
         max(1, total_batches),
         msg="Step 4/4 — Global repeat post-pass…",
@@ -1029,7 +1039,7 @@ def _openai_global_repeat_post_pass(
     )
 
     for bi, batch in enumerate(batches, start=1):
-        _progress(
+        _call_progress(progress_cb,
             bi - 1,
             max(1, total_batches),
             msg="Step 4/4 — Global repeat post-pass…",
@@ -1136,7 +1146,7 @@ def _openai_global_repeat_post_pass(
                 continue
             canonical_prior.append({"i": i_val, "text": (b.get("text") or "")})
 
-        _progress(
+        _call_progress(progress_cb,
             bi,
             max(1, total_batches),
             msg="Step 4/4 — Global repeat post-pass…",
@@ -1156,9 +1166,7 @@ def gpt_generate_guideline_recommendations_display(
     OpenAI is used to classify recommendations and then run a global repeat post-pass.
     Rendering is deterministic to guarantee nothing is dropped.
     """
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     meta = meta or {}
     gname = (meta.get("guideline_name") or meta.get("filename") or "Guideline").strip()
@@ -1199,21 +1207,10 @@ def gpt_generate_guideline_recommendations_display(
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 
-    def _progress(done=0, total=0, msg="", detail=""):
-        if not progress_cb:
-            return
-        try:
-            progress_cb(done, total, msg=msg, detail=detail)
-        except TypeError:
-            try:
-                progress_cb(done, total, msg or detail or "")
-            except TypeError:
-                progress_cb(done, total)
-
     chunks = _chunk_recs_for_classification(items, max_chars=14000, max_items=45)
     total_chunks = len(chunks)
 
-    _progress(
+    _call_progress(progress_cb,
         0,
         max(1, total_chunks),
         msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
@@ -1221,7 +1218,7 @@ def gpt_generate_guideline_recommendations_display(
     )
 
     for ci, ch in enumerate(chunks, start=1):
-        _progress(
+        _call_progress(progress_cb,
             ci - 1,
             max(1, total_chunks),
             msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
@@ -1260,7 +1257,7 @@ def gpt_generate_guideline_recommendations_display(
             sec = _safe_section_label(oi.get("section") or "")
             i_to_section[ii] = sec
 
-        _progress(
+        _call_progress(progress_cb,
             ci,
             max(1, total_chunks),
             msg="Step 4/4 — Categorizing recommendations into clinician-friendly sections…",
@@ -1319,7 +1316,7 @@ def gpt_generate_guideline_recommendations_display(
                 fallback = "Other"
             i_to_section[later_i] = fallback
 
-    _progress(
+    _call_progress(progress_cb,
         max(1, total_chunks),
         max(1, total_chunks),
         msg="Step 4/4 — Rendering clinician-friendly display…",
@@ -1447,9 +1444,7 @@ def gpt_extract_specialty(
     timeout_s: int = 30,
     max_attempts: int = 5,
 ) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1492,9 +1487,7 @@ def gpt_extract_specialty(
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def gpt_extract_study_design(title: str, abstract: str) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1541,9 +1534,7 @@ def gpt_extract_study_design(title: str, abstract: str) -> str:
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def gpt_extract_patient_details(title: str, abstract: str, patient_n: int, study_design: str) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1600,9 +1591,7 @@ def gpt_extract_intervention_comparison(
     study_design: str,
     patient_details: str,
 ) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1661,9 +1650,7 @@ def gpt_extract_authors_conclusions(
     patient_details: str,
     intervention_comparison: str,
 ) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1720,9 +1707,7 @@ def gpt_extract_results(
     patient_details: str,
     intervention_comparison: str,
 ) -> str:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1776,9 +1761,7 @@ def gpt_extract_results(
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def gpt_extract_patient_n(title: str, abstract: str) -> int:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     title = (title or "").strip()
     abstract = (abstract or "").strip()
@@ -1891,9 +1874,7 @@ def _openai_triage_sections(sections: List[Dict[str, str]]) -> List[int]:
     First pass: decide which sections likely contain formal recommendations.
     Returns a list of sec_idx (ints) to pursue.
     """
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     items = []
     for s in sections:
@@ -1994,9 +1975,7 @@ def _openai_extract_recos_from_section(section_text: str, heading_path: str) -> 
     """
     Second pass: extract recommendations from the full section text.
     """
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     sec = (section_text or "").strip()
     if not sec:
@@ -2117,42 +2096,30 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
     gid = (guideline_id or "").strip()
     if not gid:
         return 0
-    
-    def _progress(done=0, total=0, msg="", detail=""):
-        if not progress_cb:
-            return
-        try:
-            progress_cb(done, total, msg=msg, detail=detail)
-        except TypeError:
-            try:
-                progress_cb(done, total, msg or detail or "")
-            except TypeError:
-                progress_cb(done, total)
 
-
-    _progress(
+    _call_progress(progress_cb,
         0, 0,
         msg="Step 1/4 — Converting PDF to text…",
         detail="Azure Document Intelligence → Markdown",
     )
     md = markdown_from_pdf_bytes(pdf_bytes)
     if not md:
-        _progress(0, 0, msg="No extractable text found.", detail="PDF → Markdown returned empty content")
+        _call_progress(progress_cb, 0, 0, msg="No extractable text found.", detail="PDF → Markdown returned empty content")
         return 0
 
-    _progress(
+    _call_progress(progress_cb,
         0, 0,
         msg="Step 2/4 — Splitting document into sections…",
         detail="Parsing headings and building a section map",
     )
     sections = _split_markdown_into_sections(md)
     if not sections:
-        _progress(0, 0, msg="No sections found.", detail="Could not split document into headings/sections")
+        _call_progress(progress_cb, 0, 0, msg="No sections found.", detail="Could not split document into headings/sections")
         return 0
     if len(sections) > 3000:
         sections = sections[:3000]
 
-    _progress(
+    _call_progress(progress_cb,
         0, len(sections),
         msg="Step 2/4 — Triaging sections for recommendations…",
         detail="Scanning section previews for directive/recommendation language",
@@ -2163,11 +2130,12 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
         batch = sections[b0 : b0 + SECTION_TRIAGE_BATCH]
         try:
             keep = _openai_triage_sections(batch)
-        except Exception:
+        except Exception as e:
+            st.warning(f"Section triage batch failed: {e}")
             keep = []
         keep_sec_idxs.extend(keep)
 
-        _progress(
+        _call_progress(progress_cb,
             min(b0 + len(batch), len(sections)),
             len(sections),
             msg="Step 2/4 — Triaging sections for recommendations…",
@@ -2176,7 +2144,7 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
 
     keep_set = set(int(x) for x in keep_sec_idxs if isinstance(x, int) or str(x).isdigit())
     if not keep_set:
-        _progress(
+        _call_progress(progress_cb,
             len(sections), len(sections),
             msg="No recommendation sections detected.",
             detail="Triage step did not flag any candidate sections",
@@ -2192,7 +2160,7 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
         if sec_idx in keep_set:
             keep_sections.append(s)
 
-    _progress(
+    _call_progress(progress_cb,
         0, len(keep_sections),
         msg="Step 3/4 — Extracting recommendations…",
         detail=f"Analyzing {len(keep_sections)} candidate section(s)",
@@ -2207,10 +2175,10 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
         path = (s.get("path") or "").strip() or "(no heading)"
         content = (s.get("content") or "").strip()
         if not content:
-            _progress(si, total_keep, msg="Step 3/4 — Extracting recommendations…", detail=f"Skipped empty section {si}/{total_keep}")
+            _call_progress(progress_cb, si, total_keep, msg="Step 3/4 — Extracting recommendations…", detail=f"Skipped empty section {si}/{total_keep}")
             continue
 
-        _progress(
+        _call_progress(progress_cb,
             si - 1, total_keep,
             msg="Step 3/4 — Extracting recommendations…",
             detail=f"Section {si}/{total_keep}: {path[:90]}",
@@ -2221,7 +2189,8 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
             part_path = path if len(parts) == 1 else f"{path} (part {pi}/{len(parts)})"
             try:
                 extracted = _openai_extract_recos_from_section(part, part_path)
-            except Exception:
+            except Exception as e:
+                st.warning(f"Recommendation extraction failed for section '{part_path[:80]}': {e}")
                 extracted = []
 
             for rco in extracted:
@@ -2247,28 +2216,28 @@ def extract_and_store_guideline_recommendations_azure(guideline_id: str, pdf_byt
                     }
                 )
 
-        _progress(
+        _call_progress(progress_cb,
             si, total_keep,
             msg="Step 3/4 — Extracting recommendations…",
             detail=f"Finished section {si}/{total_keep} • {len(recs)} unique recommendation(s) found so far",
         )
 
     if not recs:
-        _progress(total_keep, total_keep, msg="No recommendations extracted.", detail="Candidate sections produced no extractable recommendations")
+        _call_progress(progress_cb, total_keep, total_keep, msg="No recommendations extracted.", detail="Candidate sections produced no extractable recommendations")
         return 0
 
     meta_now = get_guideline_meta(gid) or {}
-    _progress(
+    _call_progress(progress_cb,
         0, 0,
         msg="Step 4/4 — Generating clinician-friendly display…",
         detail=f"Organizing {len(recs)} recommendation(s) into sections",
     )
     disp_md = gpt_generate_guideline_recommendations_display(recs, meta_now, progress_cb=_progress)
 
-    _progress(0, 0, msg="Step 4/4 — Saving display…", detail="Writing final Markdown to database")
+    _call_progress(progress_cb, 0, 0, msg="Step 4/4 — Saving display…", detail="Writing final Markdown to database")
     update_guideline_recommendations_display(gid, disp_md)
 
-    _progress(0, 0, msg="Done.", detail=f"Saved {len(recs)} recommendation(s)")
+    _call_progress(progress_cb, 0, 0, msg="Done.", detail=f"Saved {len(recs)} recommendation(s)")
     return len(recs)
 
 
@@ -2322,9 +2291,7 @@ def gpt_extract_guideline_title_year(
     timeout_s: int = 60,
     max_attempts: int = 5,
 ) -> Dict[str, str]:
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
+    key = _require_openai_api_key()
 
     fn = (filename or "").strip()
     sn = (snippet or "").strip()

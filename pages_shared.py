@@ -32,6 +32,7 @@ GUIDELINES_MAX_LIST = 30000
 META_MAX_STUDIES_HARD_CAP = 30000
 
 _REC_LINE_RE = re.compile(r"^\s*-\s+\*\*Rec\s+(\d+)\.\*\*\s*(.*)$")
+_REC_DELETE_PATTERN = re.compile(r"(?m)^(\s*-\s+\*\*Rec\s+(\d+)\.\*\*)(\s*)")
 
 
 def _clean_pmid(raw: str) -> str:
@@ -250,8 +251,6 @@ def _guideline_md_with_delete_links(md: str, gid: str) -> str:
     base = md or ""
     gid_q = quote_plus((gid or "").strip())
 
-    pat = re.compile(r"(?m)^(\s*-\s+\*\*Rec\s+(\d+)\.\*\*)(\s*)")
-
     def repl(m: re.Match) -> str:
         num = m.group(2)
         icon = (
@@ -261,7 +260,7 @@ def _guideline_md_with_delete_links(md: str, gid: str) -> str:
         )
         return f"{m.group(1)} {icon}{m.group(3)}"
 
-    return pat.sub(repl, base)
+    return _REC_DELETE_PATTERN.sub(repl, base)
 
 
 def _dedupe_ids(values: List[str]) -> List[str]:

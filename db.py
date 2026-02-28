@@ -64,12 +64,14 @@ def ensure_schema() -> None:
         # Migration: add uploaded_at for History page (existing rows get NULL)
         try:
             conn.execute("ALTER TABLE abstracts ADD COLUMN uploaded_at TEXT;")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
         try:
             conn.execute("ALTER TABLE abstracts ADD COLUMN pub_month TEXT;")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
 
         conn.execute(
             """
@@ -98,8 +100,9 @@ def ensure_schema() -> None:
         )
         try:
             conn.execute("ALTER TABLE search_pubmed_ledger ADD COLUMN specialty_label TEXT NOT NULL DEFAULT '';")
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_search_pubmed_ledger_checked
@@ -577,12 +580,14 @@ def delete_record(pmid: str) -> None:
         conn.execute("DELETE FROM abstracts WHERE pmid=?;", (pmid,))
         try:
             conn.execute("DELETE FROM folder_papers WHERE pmid=?;", (pmid,))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
         try:
             conn.execute("DELETE FROM evidence_cart_items WHERE item_type='paper' AND item_id=?;", (pmid,))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
 
 
 def list_recent_records(limit: int) -> List[Dict[str, str]]:
@@ -1233,12 +1238,14 @@ def delete_guideline(guideline_id: str) -> None:
         conn.execute("DELETE FROM guidelines WHERE guideline_id=?;", (gid,))
         try:
             conn.execute("DELETE FROM folder_guidelines WHERE guideline_id=?;", (gid,))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
         try:
             conn.execute("DELETE FROM evidence_cart_items WHERE item_type='guideline' AND item_id=?;", (gid,))
-        except sqlite3.OperationalError:
-            pass
+        except sqlite3.OperationalError as _e:
+            if "already exists" not in str(_e).lower():
+                raise
 
 
 # ---------------- Guideline layout markdown cache ----------------

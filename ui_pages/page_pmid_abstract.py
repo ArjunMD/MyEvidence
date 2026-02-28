@@ -28,6 +28,39 @@ from pages_shared import _clean_pmid, _render_plain_text
 
 _RELATED_TRAY_KEY = "pmid_related_tray"
 
+_GPT_ERROR_KEYS = [
+    "gpt_patient_n_error",
+    "gpt_design_error",
+    "gpt_details_error",
+    "gpt_ic_error",
+    "gpt_conclusions_error",
+    "gpt_results_error",
+    "gpt_specialty_error",
+]
+
+_GPT_RESULT_PAIRS = [
+    ("gpt_patient_n", "patient_n_input", 0),
+    ("gpt_study_design", "study_design_input", ""),
+    ("gpt_patient_details", "patient_details_input", ""),
+    ("gpt_intervention_comparison", "intervention_comparison_input", ""),
+    ("gpt_authors_conclusions", "authors_conclusions_input", ""),
+    ("gpt_results", "results_input", ""),
+    ("gpt_specialty", "specialty_input", ""),
+]
+
+
+def _clear_gpt_errors() -> None:
+    """Reset all GPT extraction error keys in session state."""
+    for key in _GPT_ERROR_KEYS:
+        st.session_state[key] = ""
+
+
+def _clear_gpt_results() -> None:
+    """Reset all GPT extraction result + input keys in session state."""
+    for result_key, input_key, default in _GPT_RESULT_PAIRS:
+        st.session_state[result_key] = default
+        st.session_state[input_key] = "" if default == 0 else default
+
 
 def _get_related_tray() -> List[Dict[str, str]]:
     raw = st.session_state.get(_RELATED_TRAY_KEY)
@@ -77,6 +110,17 @@ def _add_related_pmid(pmid: str, title: str = "", source: str = "") -> bool:
     tray.append({"pmid": pid, "title": title, "source": source})
     st.session_state[_RELATED_TRAY_KEY] = tray
     return True
+
+
+def _render_field(label: str, error_key: str, input_key: str, placeholder: str = "", height: int = 0) -> None:
+    """Render an optional error banner followed by a text input or text area."""
+    err = (st.session_state.get(error_key) or "").strip()
+    if err:
+        st.error(err)
+    if height:
+        st.text_area(label, key=input_key, placeholder=placeholder, height=height)
+    else:
+        st.text_input(label, key=input_key, placeholder=placeholder)
 
 
 def _render_related_tray() -> None:
@@ -162,13 +206,7 @@ def render() -> None:
                 st.error(f"Unexpected error: {e}")
                 st.stop()
 
-        st.session_state["gpt_patient_n_error"] = ""
-        st.session_state["gpt_design_error"] = ""
-        st.session_state["gpt_details_error"] = ""
-        st.session_state["gpt_ic_error"] = ""
-        st.session_state["gpt_conclusions_error"] = ""
-        st.session_state["gpt_results_error"] = ""
-        st.session_state["gpt_specialty_error"] = ""
+        _clear_gpt_errors()
 
         if (st.session_state.get("last_abstract") or "").strip():
             try:
@@ -275,20 +313,7 @@ def render() -> None:
                 st.session_state["gpt_specialty"] = ""
                 st.session_state["specialty_input"] = ""
         else:
-            st.session_state["gpt_patient_n"] = 0
-            st.session_state["patient_n_input"] = ""
-            st.session_state["gpt_study_design"] = ""
-            st.session_state["study_design_input"] = ""
-            st.session_state["gpt_patient_details"] = ""
-            st.session_state["patient_details_input"] = ""
-            st.session_state["gpt_intervention_comparison"] = ""
-            st.session_state["intervention_comparison_input"] = ""
-            st.session_state["gpt_authors_conclusions"] = ""
-            st.session_state["authors_conclusions_input"] = ""
-            st.session_state["gpt_results"] = ""
-            st.session_state["results_input"] = ""
-            st.session_state["gpt_specialty"] = ""
-            st.session_state["specialty_input"] = ""
+            _clear_gpt_results()
 
     last_pmid = st.session_state.get("last_pmid")
     last_abstract = (st.session_state.get("last_abstract") or "").strip()
@@ -427,74 +452,25 @@ def render() -> None:
             _render_related_tray()
 
         with right:
-            cerr = (st.session_state.get("gpt_conclusions_error") or "").strip()
-            if cerr:
-                st.error(cerr)
-            st.text_area(
-                "Author's conclusions",
-                key="authors_conclusions_input",
-                placeholder="Near-verbatim conclusion statement.",
-                height=110,
-            )
-
+            _render_field("Author's conclusions", "gpt_conclusions_error", "authors_conclusions_input",
+                          placeholder="Near-verbatim conclusion statement.", height=110)
             st.divider()
-
-            serr = (st.session_state.get("gpt_specialty_error") or "").strip()
-            if serr:
-                st.error(serr)
-            st.text_input("Specialty", key="specialty_input", placeholder="e.g., Infectious Disease, Critical Care")
-
+            _render_field("Specialty", "gpt_specialty_error", "specialty_input",
+                          placeholder="e.g., Infectious Disease, Critical Care")
             st.divider()
-
-            err = (st.session_state.get("gpt_patient_n_error") or "").strip()
-            if err:
-                st.error(err)
-            st.text_input("Total patients", key="patient_n_input", placeholder="e.g., 250")
-
+            _render_field("Total patients", "gpt_patient_n_error", "patient_n_input",
+                          placeholder="e.g., 250")
             st.divider()
-
-            derr = (st.session_state.get("gpt_design_error") or "").strip()
-            if derr:
-                st.error(derr)
-            st.text_area(
-                "Study design tags",
-                key="study_design_input",
-                placeholder="e.g., Randomized controlled trial, Double-blind, Multicenter, USA",
-                height=110,
-            )
-
+            _render_field("Study design tags", "gpt_design_error", "study_design_input",
+                          placeholder="e.g., Randomized controlled trial, Double-blind, Multicenter, USA", height=110)
             st.divider()
-
-            perr = (st.session_state.get("gpt_details_error") or "").strip()
-            if perr:
-                st.error(perr)
-            st.text_area(
-                "Patient details",
-                key="patient_details_input",
-                placeholder="- Adults >=18 years with ...\n- Excluded if ...\n- Mean age ...\n- % male ...",
-                height=160,
-            )
-
+            _render_field("Patient details", "gpt_details_error", "patient_details_input",
+                          placeholder="- Adults >=18 years with ...\n- Excluded if ...\n- Mean age ...\n- % male ...",
+                          height=160)
             st.divider()
-
-            icerr = (st.session_state.get("gpt_ic_error") or "").strip()
-            if icerr:
-                st.error(icerr)
-            st.text_area(
-                "Intervention / comparison",
-                key="intervention_comparison_input",
-                placeholder="- Intervention: ...\n- Comparator: ...\n- Dose/duration: ...",
-                height=140,
-            )
-
+            _render_field("Intervention / comparison", "gpt_ic_error", "intervention_comparison_input",
+                          placeholder="- Intervention: ...\n- Comparator: ...\n- Dose/duration: ...", height=140)
             st.divider()
-
-            rerr = (st.session_state.get("gpt_results_error") or "").strip()
-            if rerr:
-                st.error(rerr)
-            st.text_area(
-                "Results",
-                key="results_input",
-                placeholder="- Primary outcome: ... (effect estimate, CI)\n- Secondary outcome: ...",
-                height=200,
-            )
+            _render_field("Results", "gpt_results_error", "results_input",
+                          placeholder="- Primary outcome: ... (effect estimate, CI)\n- Secondary outcome: ...",
+                          height=200)
