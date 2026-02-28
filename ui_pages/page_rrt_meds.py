@@ -43,7 +43,7 @@ def _build_procedure_block(name: str, proc: dict) -> str:
 
 
 def render() -> None:
-    st.title("🚨 RRT stuff")
+    st.title("🚨 Rapid Reference")
     st.caption(
         "Adult emergency quick reference only. Use institutional protocols, pharmacy guidance, and clinical judgment."
     )

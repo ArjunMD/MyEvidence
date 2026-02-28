@@ -137,7 +137,7 @@ page = st.sidebar.radio(
         "Delete",
         "About",
         "History",
-        "RRT meds",
+        "Rapid Reference",
     ],
     index=0,
     key="nav_page",
@@ -167,5 +167,5 @@ elif page == "About":
     render_about()
 elif page == "History":
     render_history()
-elif page == "RRT meds":
+elif page == "Rapid Reference":
     render_rrt_meds()

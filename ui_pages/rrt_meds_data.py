@@ -36,10 +36,8 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                 "name": "Epinephrine infusion",
                 "item_type": "medication",
                 "dose": "2-10 mcg/min IV infusion; in peri-arrest some teams start at 10 mcg/min and then down-titrate.",
-                "onset_peak_duration": "Onset under 1 minute; peak effect within minutes; duration is brief and highly titratable while running.",
                 "mechanism": "Alpha and beta agonist: acts on the whole heart, unlike atropine, making it more likely to be successful.",
-                "contra": "None.",
-                "comments": "If epinephrine not available, put a vial of cardiac epinephrine in 1L NS, mix the bag, and run it at 120 mL/hr - 600 ml/hr to approximate 2-10 mcg/min.",
+                "comments": "If infusion not available, put a vial of cardiac epinephrine in 1L NS, mix the bag, and run it at 120 mL/hr - 600 ml/hr to approximate 2-10 mcg/min.",
             },
             {
                 "name": "Calcium",
@@ -49,63 +47,31 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
             },
         ],
     },
-    "Cardiac": {
+    "Tachycardia": {
         "medications": [
             {
-                "name": "Vagal maneuvers (stable regular narrow-complex SVT)",
+                "name": "Modified Valsalva (stable regular narrow-complex SVT)",
                 "item_type": "procedure",
-                "summary": "Best first maneuver is the modified Valsalva. Use only in a hemodynamically stable patient with likely regular narrow-complex re-entrant SVT.",
                 "steps": [
-                    "Modified Valsalva (best first): start semi-recumbent at about 45 degrees. Have the patient generate about 40 mm Hg of pressure for 15 seconds (for example by forcefully blowing into a syringe or manometer). Immediately lay the patient flat and passively raise the legs to about 45 degrees for 15 seconds, then return to the semi-recumbent position and reassess rhythm after about 45 seconds.",
-                    "The modified technique is meaningfully more effective than the standard seated/semi-recumbent Valsalva and is a good first attempt while IV access, pads, and adenosine are being prepared.",
-                    "Standard Valsalva: if the modified version is not feasible, use a firm 15-second strain against a closed glottis or pressure target, but expect lower conversion rates.",
-                    "Carotid sinus massage is a backup option only: one side at a time with continuous ECG monitoring, gentle pressure over the carotid sinus for about 5-10 seconds, then reassess before considering the other side. Never massage both sides simultaneously.",
-                    "Cold facial stimulus / diving reflex is mainly a pediatric or occasional fallback maneuver; in adults it is generally less useful than modified Valsalva.",
+                    "Start semi-recumbent at about 45 degrees.  Have the patient blow forcefully into a syringe.",
+                    "Immediately lay the patient flat and passively raise the legs to about 45 degrees for 15 seconds.",
+                    "Then return to the semi-recumbent position and reassess rhythm after about 45 seconds.",
                 ],
-                "cautions": "Do not use vagal maneuvers as a delay tactic in unstable tachycardia. Avoid carotid massage with carotid bruit, known significant carotid disease, or recent TIA/stroke; many protocols also avoid it after recent MI, VF, or VT.",
             },
             {
                 "name": "Synchronized cardioversion (DCCV)",
                 "item_type": "procedure",
                 "summary": "Use for tachycardia with serious signs/symptoms caused by the rhythm. Sedate whenever feasible, but do not delay if the patient is crashing.",
                 "steps": [
-                    "Place pads, attach monitor/defibrillator, establish IV access, and have suction/airway equipment ready.",
+                    "Establish IV access and have suction/airway equipment ready. Consider having a backboard ready.",
                     "Turn SYNC on and confirm the device is marking each QRS/R wave before delivering the shock.",
-                    "Use current AHA starting energies: atrial fibrillation 200 J, atrial flutter 200 J, regular narrow-complex tachycardia 100 J, monomorphic VT with a pulse 100 J.",
-                    "If the first attempt fails, escalate energy per device/patient response and remember many defibrillators require you to re-enable synchronization after each shock.",
-                    "If synchronization is not possible and the patient is critically unstable, move to unsynchronized shock.",
+                    "Use current AHA starting energies: AFib 200 J, AFL 200 J, SVT 100 J, monomorphic VT with a pulse 100 J.",
+                    "If the first attempt fails, escalate energy and ALWAYS Re-synchronize.",
                 ],
-                "cautions": "Do not use synchronized cardioversion for polymorphic VT, VF, or pulseless VT. Shock delivery may be delayed if the monitor cannot synchronize reliably.",
-            },
-            {
-                "name": "Defibrillation (unsynchronized shock)",
-                "item_type": "procedure",
-                "summary": "Use for VF, pulseless VT, and polymorphic VT; in a crashing unstable tachyarrhythmia, use if synchronization cannot be achieved fast enough.",
-                "steps": [
-                    "Turn SYNC off before shocking. Charge while CPR continues when appropriate, then clear and shock with minimal interruption.",
-                    "Adult biphasic defibrillation: use the manufacturer recommendation (commonly 120-200 J initial); if unknown, use the maximum available setting.",
-                    "Adult monophasic defibrillation: 360 J.",
-                    "After the shock, resume CPR immediately for 2 minutes before the next rhythm check if the patient is pulseless.",
-                    "Second and later biphasic shocks should be equivalent or higher energy per device guidance.",
-                ],
-                "cautions": "Do not pause to check a pulse or rhythm for long after a shock in cardiac arrest; prioritize immediate chest compressions.",
-            },
-            {
-                "name": "Transcutaneous pacing",
-                "item_type": "procedure",
-                "summary": "Use for symptomatic bradycardia when atropine is ineffective or unlikely to work; prepare for transvenous pacing if capture is unreliable or prolonged support is expected.",
-                "steps": [
-                    "Place pacing/defibrillation pads, attach monitor, and provide analgesia/sedation if blood pressure allows because pacing is painful.",
-                    "Set a pacing rate, commonly 60-80/min.",
-                    "Increase current (mA) until electrical capture appears on the monitor, then confirm mechanical capture with a pulse, blood pressure, or bedside ultrasound - not ECG alone.",
-                    "Set the output slightly above the capture threshold and reassess capture frequently because it can be lost with movement or pad issues.",
-                    "While pacing, continue to correct reversible causes and prepare dopamine/epinephrine infusion or transvenous pacing when indicated.",
-                ],
-                "cautions": "Electrical spikes alone do not prove effective perfusion. If the patient remains unstable despite apparent capture, reassess immediately.",
             },
         ],
     },
-    "Active Ongoing Seizure": {
+    "Status Epilepticus": {
         "medications": [
             {
                 "name": "Lorazepam",
