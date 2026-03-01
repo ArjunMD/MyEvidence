@@ -598,18 +598,6 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
     "Anticoagulant Reversal": {
         "medications": [
             {
-                "name": "General approach",
-                "item_type": "procedure",
-                "summary": "Hold the anticoagulant. Determine severity. Reverse based on agent.",
-                "steps": [
-                    "Hold the anticoagulant and determine the drug, dose, and last ingestion time.",
-                    "Classify bleed severity: life-threatening (ICH, hemodynamic instability, critical-site bleed) vs major vs minor. Life-threatening → immediate full reversal. Minor → may be able to hold drug and observe.",
-                    "Labs: INR (warfarin), aPTT (heparin), anti-Xa level (LMWH, rivaroxaban, apixaban), thrombin time/dTT (dabigatran). Don't delay reversal waiting for results in a crashing patient.",
-                    "Supportive: blood products (pRBC, platelets, FFP/cryo as indicated), direct pressure, procedural hemostasis, TXA 1g IV if not contraindicated.",
-                ],
-                "cautions": "Reversal agents carry thrombotic risk. Use the minimum reversal needed for the clinical situation. Minor bleeds on DOACs often do not require specific reversal.",
-            },
-            {
                 "name": "Warfarin → 4-Factor PCC + Vitamin K",
                 "item_type": "medication",
                 "dose": "4F-PCC (Kcentra) dosed by INR: INR 2-4 → 25 units/kg; INR 4-6 → 35 units/kg; INR >6 → 50 units/kg. Max 5000 units. Give vitamin K 10 mg IV slow infusion (over 10-20 min) simultaneously.",
@@ -617,15 +605,6 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                 "mechanism": "PCC provides factors II, VII, IX, X directly. Vitamin K enables endogenous synthesis to prevent rebound coagulopathy after PCC wears off.",
                 "contra": "PCC carries thrombotic risk (DIC, DVT, PE, MI). Vitamin K IV has rare anaphylactoid risk — infuse slowly. Do NOT use FFP as first-line for life-threatening warfarin bleeds (too slow, volume overload, incomplete correction).",
                 "comments": "Recheck INR 15-30 minutes after PCC. If still elevated, may need additional PCC or FFP. Always give vitamin K with PCC.",
-            },
-            {
-                "name": "Dabigatran → Idarucizumab (Praxbind)",
-                "item_type": "medication",
-                "dose": "5 g IV total, given as two 2.5 g/50 mL vials infused or pushed consecutively.",
-                "onset_peak_duration": "Onset within minutes; complete reversal of dabigatran anticoagulant effect. Duration ~24 hours.",
-                "mechanism": "Humanized monoclonal antibody fragment that binds free and thrombin-bound dabigatran with 350x higher affinity than thrombin.",
-                "contra": "None absolute. Use for life-threatening or uncontrolled bleeding or emergency surgery. If idarucizumab unavailable, 4F-PCC 50 units/kg is a fallback (less effective).",
-                "comments": "Dabigatran is also dialyzable (useful if idarucizumab not available and patient has access). Check aPTT and thrombin time to assess residual dabigatran activity.",
             },
             {
                 "name": "Rivaroxaban / Apixaban / Edoxaban → Andexanet alfa or 4F-PCC",
