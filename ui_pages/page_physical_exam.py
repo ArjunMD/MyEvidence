@@ -1,6 +1,6 @@
 import streamlit as st
 
-from ui_pages.rrt_meds_data import MED_POINT_FIELDS, RRT_GUIDE
+from ui_pages.rrt_meds_data import MED_POINT_FIELDS, PHYSICAL_EXAM_GUIDE
 
 OPTIONAL_MED_POINT_FIELDS = [("comments", "Comments")]
 
@@ -43,18 +43,15 @@ def _build_procedure_block(name: str, proc: dict) -> str:
 
 
 def render() -> None:
-    st.title("🚨 RRT")
+    st.title("🩺 Physical Exam")
     st.caption(
-        "Rapid response team — high-acuity emergency reference. Use institutional protocols, pharmacy guidance, and clinical judgment."
+        "Bedside examination references. Use clinical judgment and institutional guidelines."
     )
-    with st.expander("Extensions", expanded=False):
-        st.markdown("- Telemetry: `8944`")
-        st.markdown("- Radiology: `5244`")
 
-    for rrt_name, rrt_data in RRT_GUIDE.items():
-        with st.expander(rrt_name, expanded=False):
+    for section_name, section_data in PHYSICAL_EXAM_GUIDE.items():
+        with st.expander(section_name, expanded=False):
             blocks = []
-            items = rrt_data.get("medications") or []
+            items = section_data.get("medications") or []
             for item in items:
                 name = str(item.get("name") or "").strip() or "Item"
                 if str(item.get("item_type") or "").strip().lower() == "procedure":

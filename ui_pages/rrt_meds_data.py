@@ -740,3 +740,7 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
         ],
     },
 }
+
+_EXAM_KEYS = {"Neuro Exams", "Rheumatologic Exam", "Skin Exam"}
+RRT_GUIDE = {k: v for k, v in RRT_MED_GUIDE.items() if k not in _EXAM_KEYS}
+PHYSICAL_EXAM_GUIDE = {k: v for k, v in RRT_MED_GUIDE.items() if k in _EXAM_KEYS}

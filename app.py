@@ -16,6 +16,7 @@ from ui_pages.page_generate_meta import render as render_generate_meta
 from ui_pages.page_guidelines import render as render_guidelines
 from ui_pages.page_history import render as render_history
 from ui_pages.page_pmid_abstract import render as render_pmid_abstract
+from ui_pages.page_physical_exam import render as render_physical_exam
 from ui_pages.page_rrt_meds import render as render_rrt_meds
 from ui_pages.page_search_pubmed import render as render_search_pubmed
 from pages_shared import (
@@ -124,23 +125,54 @@ if st.session_state.get("nav_page") in ("DB Search", "View"):
     st.session_state["nav_page"] = "Single-study view"
 if st.session_state.get("nav_page") == "DB Browse":
     st.session_state["nav_page"] = "Browse studies"
+if st.session_state.get("nav_page") == "Rapid Reference":
+    st.session_state["nav_page"] = "PMID → Abstract"
+    st.session_state["rr_page"] = "RRT"
+    st.session_state["active_section"] = "rr"
 
-page = st.sidebar.radio(
+_NAV_PAGES = [
+    "PMID → Abstract",
+    "Guidelines (PDF Upload)",
+    "Single-study view",
+    "Browse studies",
+    "Generate meta",
+    "Search PubMed",
+    "Delete",
+    "About",
+    "History",
+]
+
+_RR_PAGES = ["RRT", "Physical Exam"]
+
+if "active_section" not in st.session_state:
+    st.session_state["active_section"] = "nav"
+
+
+def _on_nav_change() -> None:
+    st.session_state["active_section"] = "nav"
+    st.session_state["rr_page"] = None
+
+
+def _on_rr_change() -> None:
+    st.session_state["active_section"] = "rr"
+
+
+nav_page = st.sidebar.radio(
     "Navigate",
-    [
-        "PMID → Abstract",
-        "Guidelines (PDF Upload)",
-        "Single-study view",
-        "Browse studies",
-        "Generate meta",
-        "Search PubMed",
-        "Delete",
-        "About",
-        "History",
-        "Rapid Reference",
-    ],
+    _NAV_PAGES,
     index=0,
     key="nav_page",
+    on_change=_on_nav_change,
+)
+
+st.sidebar.markdown("---")
+
+rr_page = st.sidebar.radio(
+    "🚨 Rapid Reference",
+    _RR_PAGES,
+    index=None,
+    key="rr_page",
+    on_change=_on_rr_change,
 )
 
 st.sidebar.caption(f"DB: `{_db_path()}`")
@@ -149,23 +181,26 @@ st.sidebar.caption(
     f"({db_count()} abstracts, {guidelines_count()} guidelines)"
 )
 
-if page == "PMID → Abstract":
+if st.session_state["active_section"] == "rr":
+    if rr_page == "RRT":
+        render_rrt_meds()
+    elif rr_page == "Physical Exam":
+        render_physical_exam()
+elif nav_page == "PMID → Abstract":
     render_pmid_abstract()
-elif page == "Guidelines (PDF Upload)":
+elif nav_page == "Guidelines (PDF Upload)":
     render_guidelines()
-elif page == "Browse studies":
+elif nav_page == "Browse studies":
     render_db_browse()
-elif page == "Single-study view":
+elif nav_page == "Single-study view":
     render_db_search()
-elif page == "Generate meta":
+elif nav_page == "Generate meta":
     render_generate_meta()
-elif page == "Search PubMed":
+elif nav_page == "Search PubMed":
     render_search_pubmed()
-elif page == "Delete":
+elif nav_page == "Delete":
     render_delete()
-elif page == "About":
+elif nav_page == "About":
     render_about()
-elif page == "History":
+elif nav_page == "History":
     render_history()
-elif page == "Rapid Reference":
-    render_rrt_meds()
