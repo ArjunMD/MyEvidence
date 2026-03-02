@@ -142,7 +142,7 @@ _NAV_PAGES = [
     "History",
 ]
 
-_RR_PAGES = ["RRT", "Physical Exam"]
+_RR_PAGES = ["RRT", "Bedside"]
 
 if "active_section" not in st.session_state:
     st.session_state["active_section"] = "nav"
@@ -183,7 +183,7 @@ rr_page = st.sidebar.radio(
 if st.session_state["active_section"] == "rr":
     if rr_page == "RRT":
         render_rrt_meds()
-    elif rr_page == "Physical Exam":
+    elif rr_page == "Bedside":
         render_physical_exam()
 elif nav_page == "PMID → Abstract":
     render_pmid_abstract()

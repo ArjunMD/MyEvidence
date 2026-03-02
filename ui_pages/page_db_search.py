@@ -124,7 +124,11 @@ def render() -> None:
         if rec.get("journal"):
             meta_bits.append(rec["journal"])
         if rec.get("year"):
-            meta_bits.append(rec["year"])
+            year_str = rec["year"]
+            pub_month = (rec.get("pub_month") or "").strip()
+            if pub_month:
+                year_str = f"{year_str}-{pub_month}"
+            meta_bits.append(year_str)
         if meta_bits:
             st.caption(" • ".join(meta_bits))
 

@@ -43,7 +43,7 @@ def _build_procedure_block(name: str, proc: dict) -> str:
 
 
 def render() -> None:
-    st.title("🩺 Physical Exam")
+    st.title("🩺 Bedside")
     st.caption(
         "Bedside examination references. Use clinical judgment and institutional guidelines."
     )
