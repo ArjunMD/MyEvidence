@@ -342,6 +342,113 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
             },
         ],
     },
+    "ECG": {
+        "medications": [
+            {
+                "name": "De Winter T-waves",
+                "item_type": "procedure",
+                "summary": "Proximal LAD occlusion (~2% of acute LAD occlusions). Pattern is often static and will not evolve into classic STEMI on serial ECGs.",
+                "steps": [
+                    "Upsloping ST depression at the J-point (1-3 mm) in V1-V6 that does NOT return to baseline, followed immediately by tall, broad, symmetric T-waves.",
+                    "Absent ST elevation in precordial leads.",
+                    "Often accompanied by 0.5-1 mm ST elevation in aVR.",
+                ],
+                "cautions": "Do not wait for evolution to STEMI — this pattern is static. Activate the cath lab.",
+            },
+            {
+                "name": "Wellens syndrome",
+                "item_type": "procedure",
+                "summary": "Critical proximal LAD stenosis seen in the pain-free state. 75% progress to anterior STEMI within days if untreated. Stress testing is absolutely contraindicated.",
+                "steps": [
+                    "Type A (25%): biphasic T-waves in V2-V3 (initial positivity, terminal negativity).",
+                    "Type B (75%): deep symmetric T-wave inversions in V2-V3, often extending to V4-V5.",
+                    "Isoelectric or minimally elevated ST segment. Preserved R-wave progression. Normal or minimally elevated troponin.",
+                    "Type A evolves into Type B (a spectrum).",
+                ],
+                "cautions": "Stress testing is contraindicated — can precipitate STEMI and sudden death. Requires urgent cath.",
+            },
+            {
+                "name": "Posterior STEMI",
+                "item_type": "procedure",
+                "summary": "Present in 15-21% of acute MIs. Frequently missed on standard 12-lead. Place posterior leads (V7-V9) whenever anterior ST depression is seen without clear alternative explanation.",
+                "steps": [
+                    "Standard 12-lead reciprocal changes: ST depression in V1-V3 (horizontal or downsloping), tall broad R-wave in V1-V2 (R/S ratio >1), dominant upright T-waves in V1-V3.",
+                    "Posterior leads (V7-V9): place at 5th intercostal space — V7 posterior axillary line, V8 tip of left scapula, V9 left paraspinal.",
+                    "ST elevation ≥0.5 mm in any posterior lead is diagnostic (≥1 mm in men <40).",
+                ],
+                "cautions": "Any unexplained anterior ST depression should prompt posterior lead placement.",
+            },
+            {
+                "name": "Right ventricular MI",
+                "item_type": "procedure",
+                "summary": "Complicates ~30-40% of inferior STEMIs. Nitrates, diuretics, and morphine are contraindicated — these patients are severely preload-dependent.",
+                "steps": [
+                    "Obtain right-sided leads on every inferior STEMI. ST elevation ≥1 mm in V4R is diagnostic.",
+                    "Standard 12-lead clues: inferior STEMI with III > II, ST elevation in V1 with depression in V2.",
+                    "Treatment: aggressive IV fluid resuscitation, maintain AV synchrony.",
+                ],
+                "cautions": "V4R ST elevation is transient — resolves within ~10 hours in 50% of patients. Obtain right-sided leads immediately.",
+            },
+            {
+                "name": "Hyperacute T-waves",
+                "item_type": "procedure",
+                "summary": "Earliest ECG sign of coronary occlusion, appearing within minutes. Precedes ST elevation. Broad-based and symmetric (unlike hyperkalemia which is narrow and peaked).",
+                "steps": [
+                    "T-waves disproportionately large relative to the QRS in the same lead. Look for T-wave amplitude > R-wave amplitude.",
+                    "Broad-based, often symmetric. May have straightened or slightly depressed ST take-off.",
+                    "Upright T in V1 taller than T in V6 is abnormal. Look in ≥2 contiguous leads.",
+                    "Reciprocal ST depression in the opposite territory increases specificity significantly.",
+                ],
+                "cautions": "Serial ECGs every 15-30 minutes — hyperacute T-waves typically evolve to ST elevation within minutes to hours.",
+            },
+            {
+                "name": "aVR ST elevation with diffuse ST depression",
+                "item_type": "procedure",
+                "summary": "Suggests left main, proximal LAD, or triple-vessel disease. Usually represents global subendocardial ischemia. Context-dependent — rule out PE and aortic dissection.",
+                "steps": [
+                    "ST elevation ≥1 mm in aVR (and often V1) with ST depression ≥1 mm in ≥6 other leads.",
+                    "aVR STE ≥ V1 STE favors left main over proximal LAD.",
+                    "With hemodynamic compromise, refractory symptoms, or cardiac arrest → treat as STEMI.",
+                ],
+                "cautions": "Differential includes massive PE, aortic dissection, LVH strain, and Takotsubo. Clinical context matters.",
+            },
+            {
+                "name": "Sgarbossa criteria (LBBB or ventricular paced rhythm)",
+                "item_type": "procedure",
+                "summary": "LBBB alone is NOT a STEMI equivalent. Use Smith-modified Sgarbossa criteria — any single positive criterion in a patient with ischemic symptoms should activate the cath lab.",
+                "steps": [
+                    "Criterion 1: concordant ST elevation ≥1 mm in any lead with a positive QRS.",
+                    "Criterion 2: concordant ST depression ≥1 mm in V1-V3.",
+                    "Criterion 3 (modified): discordant ST elevation with ST/S ratio ≤ -0.25 (STE ≥25% of the depth of the preceding S-wave).",
+                    "Same criteria apply to RV-paced rhythms (LBBB-like pattern).",
+                ],
+                "cautions": "Use the modified ratio (ST/S ≤ -0.25), not the original 5 mm cutoff. Sensitivity 80-91%, specificity 90-99%.",
+            },
+            {
+                "name": "South African Flag sign (high lateral / diagonal MI)",
+                "item_type": "procedure",
+                "summary": "Occlusion of the first diagonal branch (D1) of the LAD. Named for the pattern on a standard 4x3 ECG layout.",
+                "steps": [
+                    "ST elevation in leads I, aVL, and V2 (non-contiguous leads).",
+                    "ST depression in leads III and aVF (reciprocal).",
+                    "Any aVL STE + inferior reciprocal STD → carefully inspect V2 for the complete pattern.",
+                ],
+                "cautions": "Commonly missed due to non-contiguous lead distribution.",
+            },
+            {
+                "name": "Aslanger pattern",
+                "item_type": "procedure",
+                "summary": "Acute inferior occlusion masked by concomitant multi-vessel disease. Larger infarcts and higher mortality than standard inferior STEMI. Frequently undertreated.",
+                "steps": [
+                    "All three criteria must be present:",
+                    "1. ST elevation in lead III only (NOT in II or aVF).",
+                    "2. ST depression in any of V4-V6 with a positive (or terminally positive) T-wave.",
+                    "3. ST segment in V1 is at a higher level than ST segment in V2.",
+                ],
+                "cautions": "Culprit is more commonly LCx than RCA. Treat as inferior STEMI — these patients are frequently missed as NSTEMI.",
+            },
+        ],
+    },
     "Anaphylaxis": {
         "medications": [
             {
@@ -741,6 +848,6 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
     },
 }
 
-_EXAM_KEYS = {"Neuro Exams", "Rheumatologic Exam", "Skin Exam"}
+_EXAM_KEYS = {"Neuro Exams", "Rheumatologic Exam", "Skin Exam", "ECG"}
 RRT_GUIDE = {k: v for k, v in RRT_MED_GUIDE.items() if k not in _EXAM_KEYS}
 PHYSICAL_EXAM_GUIDE = {k: v for k, v in RRT_MED_GUIDE.items() if k in _EXAM_KEYS}

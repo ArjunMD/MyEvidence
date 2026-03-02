@@ -165,6 +165,11 @@ nav_page = st.sidebar.radio(
     on_change=_on_nav_change,
 )
 
+st.sidebar.caption(
+    f"Saved: **{db_count_all()}**  "
+    f"({db_count()} abstracts, {guidelines_count()} guidelines)"
+)
+
 st.sidebar.markdown("---")
 
 rr_page = st.sidebar.radio(
@@ -173,12 +178,6 @@ rr_page = st.sidebar.radio(
     index=None,
     key="rr_page",
     on_change=_on_rr_change,
-)
-
-st.sidebar.caption(f"DB: `{_db_path()}`")
-st.sidebar.caption(
-    f"Saved: **{db_count_all()}**  "
-    f"({db_count()} abstracts, {guidelines_count()} guidelines)"
 )
 
 if st.session_state["active_section"] == "rr":
