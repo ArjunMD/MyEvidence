@@ -761,7 +761,6 @@ _GUIDELINE_SECTION_CHOICES = [
     "Monitoring",
     "Post-hospitalization care",
     "Secondary prevention",
-    "Patient education",
     "Special populations",
     "Possible repeats",
 ]
@@ -1195,6 +1194,7 @@ def gpt_generate_guideline_recommendations_display(
         f"{', '.join(s for s in _GUIDELINE_SECTION_CHOICES if s != 'Possible repeats')}\n"
         "- If none fit, place in 'Other'.\n"
         "- A note about the 'Disposition' section: This refers to just after initial evaluaion. I.e., whether the patient should be discharged from the emergency department, admitted to the a hospital floor, or admitted to the intensive care unit (or sometimes other options as well).\n"
+        "- A note about the 'Cautions / Contraindications' section: Use this ONLY for actual safety warnings — specific clinical scenarios where a therapy is contraindicated, should be avoided, or requires dose modification. Do NOT use it for qualifying context, methodological caveats, or clarifying statements about other recommendations. Those belong in the clinical section they relate to (e.g., a caveat about antibiotic duration belongs in Medicines).\n"
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 
@@ -1416,6 +1416,13 @@ def gpt_generate_guideline_recommendations_display(
             rec_txt = re.sub(r"(?<=[a-zA-Z])\.(\d+(?:[,\-–]\s*\d+)*)", ".", rec_txt)  # inline citations
             rec_txt = re.sub(r"\s*\(\d+(?:[,\s\-–]+\d+)*\)", "", rec_txt)  # parenthetical citations
             rec_txt = re.sub(r"(?<=[a-zA-Z])[*†‡§]+(?=[\s,;.\)]|$)", "", rec_txt)  # footnote markers
+            # Strip leading transitional words that read awkwardly as standalone bullets
+            rec_txt = re.sub(
+                r"^(Thus|However|Therefore|Accordingly|Furthermore|Moreover|Hence|Consequently|In addition|Additionally),?\s*",
+                "", rec_txt, flags=re.IGNORECASE,
+            )
+            if rec_txt:
+                rec_txt = rec_txt[0].upper() + rec_txt[1:]
             rec_txt = rec_txt.strip()
             extras: List[str] = []
             if e["strength"] and not _attr_value_present_in_reco_text(rec_txt, e["strength"]):
@@ -2056,7 +2063,7 @@ def _openai_extract_recos_from_section(section_text: str, heading_path: str) -> 
     strictness = (GUIDELINE_OPENAI_STRICTNESS or "medium").strip().lower()
 
     instructions = f"""You extract *formal clinical guideline recommendations* from a single guideline section.
-You must be faithful to the text.
+You must be faithful to the text. The audience is a hospital-based clinician.
 
 Return ONLY valid JSON with this exact shape:
 {{ "items": [ {{"recommendation_text":"...","strength_raw":"...","evidence_raw":"...","source_snippet":"..."}}, ... ] }}
@@ -2071,6 +2078,16 @@ Rules:
 - Do NOT use directive wording (e.g., "we recommend", "we suggest") as strength/evidence labels.
 - source_snippet: verbatim excerpt <= 240 chars that supports the recommendation (include grade markers if present).
 - Strings only; never null. No extra keys.
+
+Do NOT extract any of the following:
+- Flowchart labels, captions, or single-step fragments (e.g., "Perform diagnostic imaging", "All criteria met?").
+- Administrative, documentation, or quality-assurance directives (e.g., "results should be stored in the medical record").
+- Training or credentialing requirements (e.g., "clinician skill level must be formally assessed").
+- Vague truisms that any clinician already knows (e.g., "decisions should be tailored to each patient's needs").
+- Meta-commentary about evidence quality, guideline methodology, or how to interpret recommendations.
+- Sentences that only qualify or caveat another recommendation without standalone clinical value (e.g., "However, this recommendation does not obviate…").
+- References to tables, figures, or other guidelines that carry no standalone clinical content (e.g., "Refer to References 6 and 7").
+- Patient communication, shared decision-making guidance, or patient education materials.
 
 Strictness mode: '{strictness}'
 - In 'strict': extract only clearly labeled/graded or clearly directive guidance intended as recommendations.

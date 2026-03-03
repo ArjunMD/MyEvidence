@@ -67,6 +67,17 @@ def _clean_guideline_display(md: str) -> str:
     s = re.sub(r"\s*\(\d+(?:[,\s\-–]+\d+)*\)", "", s)
     # Strip footnote markers: "algorithm*" → "algorithm"
     s = re.sub(r"(?<=[a-zA-Z])[*†‡§]+(?=[\s,;.\)]|$)", "", s)
+    # Strip leading transitional words from each recommendation line
+    def _strip_transition(m: re.Match) -> str:
+        prefix = m.group(1)  # e.g. "- **3.** "
+        body = re.sub(
+            r"^(Thus|However|Therefore|Accordingly|Furthermore|Moreover|Hence|Consequently|In addition|Additionally),?\s*",
+            "", m.group(2), flags=re.IGNORECASE,
+        )
+        if body:
+            body = body[0].upper() + body[1:]
+        return prefix + body
+    s = re.sub(r"(^\s*-\s+\*\*(?:Rec\s+)?\d+\.\*\*\s*)(.*)", _strip_transition, s, flags=re.MULTILINE)
     return s.strip()
 
 
