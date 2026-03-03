@@ -77,7 +77,7 @@ def _clean_guideline_display(md: str) -> str:
         if body:
             body = body[0].upper() + body[1:]
         return prefix + body
-    s = re.sub(r"(^\s*-\s+\*\*(?:Rec\s+)?\d+\.\*\*\s*)(.*)", _strip_transition, s, flags=re.MULTILINE)
+    s = re.sub(r"(^\s*(?:-\s+)?\*\*(?:Rec\s+)?\d+\.\*\*\s*)(.*)", _strip_transition, s, flags=re.MULTILINE)
     return s.strip()
 
 

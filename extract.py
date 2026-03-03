@@ -1430,7 +1430,7 @@ def gpt_generate_guideline_recommendations_display(
             if e["evidence"] and not _attr_value_present_in_reco_text(rec_txt, e["evidence"]):
                 extras.append(f"Evidence: {e['evidence']}")
             extra_txt = f" ({'; '.join(extras)})" if extras else ""
-            md_lines.append(f"- **{display_num}.** {rec_txt}{extra_txt}")
+            md_lines.append(f"**{display_num}.** {rec_txt}{extra_txt}")
         md_lines.append("")
 
     return "\n".join(md_lines).strip()
