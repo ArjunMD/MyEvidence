@@ -33,6 +33,22 @@ _GUIDELINE_ATTR_SEGMENT_RE = re.compile(
 _GUIDELINE_PSEUDO_ATTR_VALUE_RE = re.compile(
     r"(?i)^\s*(?:we\s+)?(?:recommend|suggest|consider|avoid|do\s+not|don't|should)\b"
 )
+# Matches parenthetical text containing clinical grading keywords (inline grading)
+_GUIDELINE_INLINE_GRADE_RE = re.compile(
+    r"\(("
+    r"[^)]*"
+    r"\b(?:"
+    r"(?:strong|weak|conditional)\s+recommendation"
+    r"|good\s+practice\s+statement"
+    r"|class\s*(?:[ivx]+|\d+[a-z]?)"
+    r"|grade\s*(?:[a-d]|\d+[a-z]?)"
+    r"|level\s*(?:of\s+evidence\s*)?[a-d](?:-[a-z]+)?"
+    r"|(?:very\s+low|low|moderate|high)\s+(?:certainty|quality)"
+    r")\b"
+    r"[^)]*"
+    r")\)",
+    flags=re.IGNORECASE,
+)
 _GUIDELINE_ATTR_BLUE_HEX = "#2F8CFF"
 
 
@@ -59,7 +75,17 @@ def _highlight_guideline_strength_evidence(md: str) -> str:
         txt = f"{label} {value}".strip()
         return f"<span style='color: {_GUIDELINE_ATTR_BLUE_HEX};'>{html.escape(txt)}</span>"
 
-    return _GUIDELINE_ATTR_SEGMENT_RE.sub(_repl, s)
+    result = _GUIDELINE_ATTR_SEGMENT_RE.sub(_repl, s)
+
+    # Second pass: highlight inline grading inside parentheses
+    # e.g. "(conditional recommendation, moderate certainty of evidence)"
+    def _inline_repl(m: re.Match) -> str:
+        content = m.group(1)
+        if "<span" in content:
+            return m.group(0)
+        return f"(<span style='color: {_GUIDELINE_ATTR_BLUE_HEX};'>{html.escape(content)}</span>)"
+
+    return _GUIDELINE_INLINE_GRADE_RE.sub(_inline_repl, result)
 
 
 def render() -> None:

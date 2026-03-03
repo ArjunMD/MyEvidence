@@ -1152,9 +1152,10 @@ def gpt_generate_guideline_recommendations_display(
     progress_cb=None,
 ) -> str:
     """
-    Produces markdown with clinician-friendly sections, containing EVERY recommendation.
+    Produces markdown with clinician-friendly sections.
     OpenAI is used to classify recommendations and then run a global repeat post-pass.
-    Rendering is deterministic to guarantee nothing is dropped.
+    Inferior duplicates are dropped; an exception keeps an ungraded-but-more-complete
+    copy as a "Possible repeat" when the best copy is graded.
     """
     key = _openai_api_key()
     if not key:
@@ -1191,11 +1192,9 @@ def gpt_generate_guideline_recommendations_display(
         "Rules:\n"
         "- Each input item must appear exactly once in output.\n"
         "- section must be ONE short label. Prefer from this list and in this order:\n"
-        f"{', '.join(_GUIDELINE_SECTION_CHOICES)}\n"
+        f"{', '.join(s for s in _GUIDELINE_SECTION_CHOICES if s != 'Possible repeats')}\n"
         "- If none fit, place in 'Other'.\n"
         "- A note about the 'Disposition' section: This refers to just after initial evaluaion. I.e., whether the patient should be discharged from the emergency department, admitted to the a hospital floor, or admitted to the intensive care unit (or sometimes other options as well).\n"
-        "- A note about the 'Possible repeats' section: use this if a later recommendation appears to be a duplicate or near-duplicate, either semantically or literally, of an earlier recommendation in the guideline. This overrides categorizing it somewhere else.\n"
-        "- If near-duplicates differ only because one has explicit strength/evidence and the other does not, keep the one with explicit strength/evidence in the clinical section and place the ungraded one in 'Possible repeats'.\n"
         "- Do NOT include any extra keys. No markdown. No commentary."
     )
 
@@ -1284,37 +1283,81 @@ def gpt_generate_guideline_recommendations_display(
     except Exception:
         repeat_overrides = {}
 
+    drop_set: Set[int] = set()
+
     if repeat_overrides:
         pre_repeat_sections = {
             int(i): _safe_section_label(sec)
             for i, sec in i_to_section.items()
         }
 
-        final_repeats: Set[int] = set()
+        # Build text length map for completeness comparison
+        rec_text_len: Dict[int, int] = {}
+        ii_len = 0
+        for r in recs or []:
+            txt_r = (r.get("recommendation_text") or "").strip()
+            if not txt_r:
+                continue
+            ii_len += 1
+            rec_text_len[ii_len] = len(txt_r)
+
+        # Resolve chains: if A→B and B→C, resolve both to C's ultimate canonical
+        resolved: Dict[int, int] = {}
+        for later_i in repeat_overrides:
+            canon = int(repeat_overrides[later_i])
+            seen = {int(later_i)}
+            while canon in repeat_overrides and canon not in seen:
+                seen.add(canon)
+                canon = int(repeat_overrides[canon])
+            resolved[int(later_i)] = canon
+
+        # Group all duplicates by their ultimate canonical item
+        canon_groups: Dict[int, List[int]] = {}
+        for later_i, canon_i in resolved.items():
+            canon_groups.setdefault(canon_i, []).append(later_i)
+
         keep_later_real: Dict[int, int] = {}
 
-        for later_i, earlier_i in sorted(repeat_overrides.items(), key=lambda kv: kv[0]):
-            earlier_has_grade = bool(rec_has_grade_signal.get(int(earlier_i), False))
-            later_has_grade = bool(rec_has_grade_signal.get(int(later_i), False))
+        for canon_i, later_list in canon_groups.items():
+            all_items = [canon_i] + sorted(later_list)
 
-            # If the earlier copy is ungraded but the later copy has explicit strength/evidence,
-            # keep the later one in a real category and move the earlier one to Possible repeats.
-            if (not earlier_has_grade) and later_has_grade:
-                final_repeats.add(int(earlier_i))
-                keep_later_real[int(later_i)] = int(earlier_i)
-            else:
-                final_repeats.add(int(later_i))
+            # Pick the best: prefer graded (has strength/evidence), then longest text
+            def _dup_score(idx: int) -> tuple:
+                g = 1 if rec_has_grade_signal.get(idx, False) else 0
+                return (g, rec_text_len.get(idx, 0))
 
-        for i_repeat in final_repeats:
-            i_to_section[i_repeat] = "Possible repeats"
+            best_i = max(all_items, key=_dup_score)
+            best_has_grade = bool(rec_has_grade_signal.get(best_i, False))
+            best_len = rec_text_len.get(best_i, 0)
 
-        for later_i, earlier_i in keep_later_real.items():
-            if later_i in final_repeats:
+            for item_i in all_items:
+                if item_i == best_i:
+                    # If the best is a later item, it needs the canonical's section
+                    if item_i != canon_i:
+                        keep_later_real[item_i] = canon_i
+                    continue
+
+                item_has_grade = bool(rec_has_grade_signal.get(item_i, False))
+                item_len = rec_text_len.get(item_i, 0)
+                item_is_more_complete = (item_len > best_len + 30
+                                         and item_len > best_len * 1.2)
+
+                # Exception: best has grade, item is ungraded but meaningfully
+                # more complete — keep the item as a possible repeat so the
+                # clinician can review it.
+                if best_has_grade and not item_has_grade and item_is_more_complete:
+                    i_to_section[item_i] = "Possible repeats"
+                else:
+                    drop_set.add(item_i)
+
+        # Ensure kept later items get a proper clinical section
+        for later_i, canon_i in keep_later_real.items():
+            if later_i in drop_set:
                 continue
             sec_now = _safe_section_label(i_to_section.get(later_i, "Other"))
             if sec_now != "Possible repeats":
                 continue
-            fallback = _safe_section_label(pre_repeat_sections.get(earlier_i, "Other"))
+            fallback = _safe_section_label(pre_repeat_sections.get(canon_i, "Other"))
             if fallback == "Possible repeats":
                 fallback = "Other"
             i_to_section[later_i] = fallback
@@ -1326,8 +1369,7 @@ def gpt_generate_guideline_recommendations_display(
         detail="Formatting final Markdown output",
     )
 
-    # Render ALL recommendations deterministically (full text + strength/evidence/source)
-    # Note: recs list already matches the i-order we used above (minus empty-text drops)
+    # Render recommendations (full text + strength/evidence/source), skipping dropped repeats
     enriched: List[Dict] = []
     ii = 0
     for r in recs or []:
@@ -1335,6 +1377,8 @@ def gpt_generate_guideline_recommendations_display(
         if not txt:
             continue
         ii += 1
+        if ii in drop_set:
+            continue
         strength = _sanitize_guideline_attr_value(r.get("strength_raw") or "")
         evidence = _sanitize_guideline_attr_value(r.get("evidence_raw") or "")
         enriched.append(
