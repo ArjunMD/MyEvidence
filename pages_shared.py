@@ -31,7 +31,7 @@ BROWSE_MAX_ROWS = 30000
 GUIDELINES_MAX_LIST = 30000
 META_MAX_STUDIES_HARD_CAP = 30000
 
-_REC_LINE_RE = re.compile(r"^\s*-\s+\*\*Rec\s+(\d+)\.\*\*\s*(.*)$")
+_REC_LINE_RE = re.compile(r"^\s*-\s+\*\*(?:Rec\s+)?(\d+)\.\*\*\s*(.*)$")
 
 
 def _clean_pmid(raw: str) -> str:
@@ -250,13 +250,13 @@ def _guideline_md_with_delete_links(md: str, gid: str) -> str:
     base = md or ""
     gid_q = quote_plus((gid or "").strip())
 
-    pat = re.compile(r"(?m)^(\s*-\s+\*\*Rec\s+(\d+)\.\*\*)(\s*)")
+    pat = re.compile(r"(?m)^(\s*-\s+\*\*(?:Rec\s+)?(\d+)\.\*\*)(\s*)")
 
     def repl(m: re.Match) -> str:
         num = m.group(2)
         icon = (
             f"<a href='?gid={gid_q}&delrec={num}' target='_self' "
-            f"title='Delete Rec {num}' "
+            f"title='Delete #{num}' "
             f"style='text-decoration:none; opacity:0.35; margin-left:0.25rem;'>🗑️</a>"
         )
         return f"{m.group(1)} {icon}{m.group(3)}"

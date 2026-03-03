@@ -1402,21 +1402,28 @@ def gpt_generate_guideline_recommendations_display(
 
     sections_sorted = sorted(grouped.keys(), key=_sec_sort_key)
 
-    md_lines: List[str] = ["", "## Recommendations", ""]
+    md_lines: List[str] = [""]
 
+    display_num = 0
     for sec in sections_sorted:
         md_lines.append(f"### {sec}")
         md_lines.append("")
         for e in grouped.get(sec, []):
+            display_num += 1
+            rec_txt = e["text"]
+            # Clean PDF artifacts from recommendation text
+            rec_txt = re.sub(r"(\w)- (\w)", r"\1\2", rec_txt)  # line-break hyphens
+            rec_txt = re.sub(r"(?<=[a-zA-Z])\.(\d+(?:[,\-–]\s*\d+)*)", ".", rec_txt)  # inline citations
+            rec_txt = re.sub(r"\s*\(\d+(?:[,\s\-–]+\d+)*\)", "", rec_txt)  # parenthetical citations
+            rec_txt = re.sub(r"(?<=[a-zA-Z])[*†‡§]+(?=[\s,;.\)]|$)", "", rec_txt)  # footnote markers
+            rec_txt = rec_txt.strip()
             extras: List[str] = []
-            if e["strength"] and not _attr_value_present_in_reco_text(e["text"], e["strength"]):
+            if e["strength"] and not _attr_value_present_in_reco_text(rec_txt, e["strength"]):
                 extras.append(f"Strength: {e['strength']}")
-            if e["evidence"] and not _attr_value_present_in_reco_text(e["text"], e["evidence"]):
+            if e["evidence"] and not _attr_value_present_in_reco_text(rec_txt, e["evidence"]):
                 extras.append(f"Evidence: {e['evidence']}")
             extra_txt = f" ({'; '.join(extras)})" if extras else ""
-            md_lines.append(f"- **Rec {e['i']}.** {e['text']}{extra_txt}")
-           # if e["path"]:
-            #    md_lines.append(f"  - _Source section:_ {e['path']}")
+            md_lines.append(f"- **{display_num}.** {rec_txt}{extra_txt}")
         md_lines.append("")
 
     return "\n".join(md_lines).strip()

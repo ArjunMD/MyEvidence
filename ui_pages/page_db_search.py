@@ -52,6 +52,24 @@ _GUIDELINE_INLINE_GRADE_RE = re.compile(
 _GUIDELINE_ATTR_BLUE_HEX = "#2F8CFF"
 
 
+def _clean_guideline_display(md: str) -> str:
+    """Display-time cleanup for stored guideline markdown (idempotent)."""
+    s = (md or "").strip()
+    if not s:
+        return ""
+    # Remove redundant ## Recommendations heading
+    s = re.sub(r"^##\s+Recommendations\s*\n+", "", s)
+    # Fix PDF line-break hyphens: "comprehen- sive" → "comprehensive"
+    s = re.sub(r"(\w)- (\w)", r"\1\2", s)
+    # Strip inline citation numbers after periods: "PE.1,2" → "PE."
+    s = re.sub(r"(?<=[a-zA-Z])\.(\d+(?:[,\-–]\s*\d+)*)", ".", s)
+    # Strip parenthetical citation numbers: "(42, 47, 48)" → ""
+    s = re.sub(r"\s*\(\d+(?:[,\s\-–]+\d+)*\)", "", s)
+    # Strip footnote markers: "algorithm*" → "algorithm"
+    s = re.sub(r"(?<=[a-zA-Z])[*†‡§]+(?=[\s,;.\)]|$)", "", s)
+    return s.strip()
+
+
 def _highlight_guideline_strength_evidence(md: str) -> str:
     s = md or ""
     if not s:
@@ -259,11 +277,12 @@ def render() -> None:
                 if removed:
                     update_guideline_recommendations_display(gid, new_md)
                     st.session_state[f"dbs_guideline_edit_{gid}"] = True
-                    st.success(f"Deleted: {', '.join([f'Rec {n}' for n in removed])}")
+                    st.success(f"Deleted: {', '.join([f'#{n}' for n in removed])}")
                 else:
                     st.info("No matching recommendation numbers found.")
 
         disp = (get_guideline_recommendations_display(gid) or "").strip()
+        disp = _clean_guideline_display(disp)
         disp_colored = _highlight_guideline_strength_evidence(disp)
 
         c_l, c_r = st.columns([6, 1], gap="small")
