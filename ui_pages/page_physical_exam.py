@@ -60,3 +60,24 @@ def render() -> None:
                     blocks.append(_build_medication_block(name, item))
             if blocks:
                 st.markdown("\n\n".join(blocks))
+
+    with st.expander("Medications Incompatible with Lactated Ringer's", expanded=False):
+        st.markdown(
+            "Lactated Ringer's contains **calcium (Ca²⁺)**, which is the primary "
+            "source of incompatibility. Always verify with pharmacy references.\n\n"
+            "| Medication | Reason |\n"
+            "| --- | --- |\n"
+            "| **Ceftriaxone** | Risk of calcium–ceftriaxone precipitate (especially neonates) |\n"
+            "| **Phenytoin / Fosphenytoin** | Crystallizes in calcium/dextrose-containing solutions; use NS only |\n"
+            "| **Sodium bicarbonate** | Forms calcium carbonate precipitate |\n"
+            "| **Blood products (pRBCs, FFP, platelets)** | Ca²⁺ overwhelms citrate anticoagulant → microclots |\n"
+            "| **Amphotericin B** | Incompatible with electrolyte-containing solutions |\n"
+            "| **Diazepam** | Precipitates in most IV solutions including LR |\n"
+            "| **Propofol** | Manufacturer advises against dilution with LR |\n"
+            "| **Mannitol** | Can crystallize with electrolyte solutions |\n"
+            "| **Aminocaproic acid** | Incompatible with LR |\n"
+            "| **Metoclopramide** | Incompatible with calcium-containing solutions |\n"
+            "| **Ampicillin / Ampicillin-sulbactam** | Accelerated degradation in LR |\n"
+            "| **Nitroglycerin** | Stability issues with LR |\n"
+            "| **TPN (total parenteral nutrition)** | Ca²⁺ interaction with phosphate → precipitate |"
+        )
