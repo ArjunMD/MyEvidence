@@ -629,7 +629,7 @@ def _openai_api_key() -> str:
 
 
 def _openai_model() -> str:
-    return ("gpt-5.2")
+    return ("gpt-5.4")
 
 
 # ---------------- Semantic Scholar helpers ----------------
