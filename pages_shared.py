@@ -351,19 +351,25 @@ def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
 
 def get_focused_question_instructions_lines() -> List[str]:
     return [
-        "You are helping a clinician answer a focused clinical question using multiple studies and guidelines.",
-        "Write an answer to the question in the following format: First, give a concise answer (best attempt).",
-        "Next, summarize the evidence that supports the answer. Use bullet points.",
-        "Next, summarize the limitations of the above evidence, evidence that conflicts with the above, or evidence that supports an alternate answer. Use bullet points.",
+        "You are helping a clinician answer a focused clinical question using the provided studies and guidelines.",
+        "",
+        "Use exactly these sections in order:",
+        "",
+        "**Answer:** 1-2 sentences giving the best direct answer to the question.",
+        "",
+        "**Supporting evidence:**",
+        "- One bullet per key finding. Lead each bullet with the specific data (effect size, CI, OR/HR/RR, NNT, p-value, absolute risk, or percentage) before the narrative. Include sample size (N) when available.",
+        "- Cite source labels exactly as shown in SOURCES (e.g., STUDY 2; GUIDELINE 5).",
+        "",
+        "**Conflicting evidence or limitations:**",
+        "- One bullet per point. Include data when available.",
+        "- Only include if genuinely present; omit this section entirely if there are none.",
+        "",
         "Hard rules:",
-        "- Use ONLY information in the provided blocks. Do not invent details.",
+        "- Use ONLY information in the provided sources. Do not invent or infer details.",
         "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
-        "- If studies or guidelines conflict or are too heterogeneous/unclear, say so plainly.",
-        "- If it is difficult to answer the question in a single way, say so plainly and give the different possible answers along with the evidence for each.",
-        "- Mention key limitations that are explicitly apparent without overreaching.",
-        "- When making a substantive claim, cite source label(s) exactly as shown in SOURCES in parentheses (e.g., STUDY 2; GUIDELINE 5).",
-        "- Title each section with a bold heading then a colon.",
-        "- Tone: Clear and organized",
+        "- If the evidence is conflicting or too heterogeneous to give a single answer, state the different possible answers with the supporting data for each.",
+        "- Be concise. No filler sentences, no restating the question, no introductory preamble.",
     ]
 
 
@@ -417,9 +423,9 @@ def gpt_generate_meta_combined(
     instructions = "\n".join(instructions_lines) + "\n"
 
     if descriptor_line:
-        input_field = f"{descriptor_line}\n\nSOURCES:\n{content_text}\n\nNow write the single-paragraph output."
+        input_field = f"{descriptor_line}\n\nSOURCES:\n{content_text}\n\nNow write the output."
     else:
-        input_field = f"SOURCES:\n{content_text}\n\nNow write the single-paragraph output."
+        input_field = f"SOURCES:\n{content_text}\n\nNow write the output."
 
     key = _openai_api_key()
     if not key:
