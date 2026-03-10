@@ -572,6 +572,42 @@ def get_record(pmid: str) -> Dict[str, str]:
         }
 
 
+def update_record(
+    pmid: str,
+    patient_n: Optional[int],
+    study_design: Optional[str],
+    patient_details: Optional[str],
+    intervention_comparison: Optional[str],
+    authors_conclusions: Optional[str],
+    results: Optional[str],
+    specialty: Optional[str],
+) -> None:
+    with _connect_db() as conn:
+        conn.execute(
+            """
+            UPDATE abstracts
+            SET patient_n = ?,
+                study_design = ?,
+                patient_details = ?,
+                intervention_comparison = ?,
+                authors_conclusions = ?,
+                results = ?,
+                specialty = ?
+            WHERE pmid = ?;
+            """,
+            (
+                patient_n,
+                study_design,
+                patient_details,
+                intervention_comparison,
+                authors_conclusions,
+                results,
+                specialty,
+                pmid,
+            ),
+        )
+
+
 def delete_record(pmid: str) -> None:
     with _connect_db() as conn:
         conn.execute("DELETE FROM abstracts WHERE pmid=?;", (pmid,))

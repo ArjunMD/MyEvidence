@@ -17,6 +17,7 @@ from ui_pages.page_guidelines import render as render_guidelines
 from ui_pages.page_history import render as render_history
 from ui_pages.page_pmid_abstract import render as render_pmid_abstract
 from ui_pages.page_physical_exam import render as render_physical_exam
+from ui_pages.page_reminders import render as render_reminders
 from ui_pages.page_rrt_meds import render as render_rrt_meds
 from ui_pages.page_search_pubmed import render as render_search_pubmed
 from pages_shared import (
@@ -137,12 +138,12 @@ _NAV_PAGES = [
     "Browse studies",
     "Generate meta",
     "Search PubMed",
-    "Delete",
+    "Manage",
     "About",
     "History",
 ]
 
-_RR_PAGES = ["RRT", "Bedside"]
+_RR_PAGES = ["RRT", "Bedside", "Reminders"]
 
 if "active_section" not in st.session_state:
     st.session_state["active_section"] = "nav"
@@ -185,6 +186,8 @@ if st.session_state["active_section"] == "rr":
         render_rrt_meds()
     elif rr_page == "Bedside":
         render_physical_exam()
+    elif rr_page == "Reminders":
+        render_reminders()
 elif nav_page == "PMID → Abstract":
     render_pmid_abstract()
 elif nav_page == "Guidelines (PDF Upload)":
@@ -197,7 +200,7 @@ elif nav_page == "Generate meta":
     render_generate_meta()
 elif nav_page == "Search PubMed":
     render_search_pubmed()
-elif nav_page == "Delete":
+elif nav_page == "Manage":
     render_delete()
 elif nav_page == "About":
     render_about()
