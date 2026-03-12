@@ -56,16 +56,21 @@ def _evidence_score(item_type: str, item_id: str) -> tuple[int, str]:
     return (80, "Other")
 
 
-def _tiebreaker_keys(item_type: str, item_id: str) -> tuple[int, int]:
-    """Return (patient_n, is_multicenter) for breaking ties among same-score citations.
+def _tiebreaker_keys(item_type: str, item_id: str) -> tuple[int, int, int]:
+    """Return (year, patient_n, is_multicenter) for breaking ties among same-score citations.
 
-    Larger patient N and multicenter status are preferred (sorted descending).
+    Guidelines: newest publication year first (year descending).
+    Abstracts:  larger patient N first, then multicenter > single-center.
     """
     if item_type == "guideline":
-        return (0, 0)
+        meta = get_guideline_meta(item_id)
+        raw_year = (meta.get("pub_year") or "").strip() if meta else ""
+        year = int(raw_year) if raw_year.isdigit() else 0
+        return (year, 0, 0)
+
     rec = get_record(item_id)
     if not rec:
-        return (0, 0)
+        return (0, 0, 0)
 
     # patient_n — extract the first integer from the free-text field
     raw_n = (rec.get("patient_n") or "").strip()
@@ -82,23 +87,23 @@ def _tiebreaker_keys(item_type: str, item_id: str) -> tuple[int, int]:
         for kw in ("multicenter", "multi-center", "multicentre", "multi-centre")
     ) else 0
 
-    return (patient_n, is_multi)
+    return (year, patient_n, is_multi)
 
 
 def _sort_citations_by_evidence(citations: list[dict]) -> list[dict]:
     """Sort citations by evidence score (strongest first) and attach display_num + evidence_label.
 
     Tiebreakers for same evidence score:
-      1. Patient N — larger sample size first
-      2. Multicenter > single-center
+      - Guidelines: newest publication year first
+      - Abstracts:  larger patient N first, then multicenter > single-center
     """
     scored = []
     for c in citations:
         score, label = _evidence_score(c["item_type"], c["item_id"])
-        patient_n, is_multi = _tiebreaker_keys(c["item_type"], c["item_id"])
+        year, patient_n, is_multi = _tiebreaker_keys(c["item_type"], c["item_id"])
         scored.append({**c, "_score": score, "evidence_label": label,
-                       "_patient_n": patient_n, "_multicenter": is_multi})
-    scored.sort(key=lambda x: (x["_score"], -x["_patient_n"], -x["_multicenter"]))
+                       "_year": year, "_patient_n": patient_n, "_multicenter": is_multi})
+    scored.sort(key=lambda x: (x["_score"], -x["_year"], -x["_patient_n"], -x["_multicenter"]))
     for i, c in enumerate(scored, start=1):
         c["display_num"] = i
     return scored
