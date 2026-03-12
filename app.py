@@ -5,6 +5,7 @@ from db import (
     db_count,
     db_count_all,
     ensure_guidelines_schema,
+    ensure_pathways_schema,
     ensure_schema,
     guidelines_count,
 )
@@ -16,7 +17,8 @@ from ui_pages.page_generate_meta import render as render_generate_meta
 from ui_pages.page_guidelines import render as render_guidelines
 from ui_pages.page_history import render as render_history
 from ui_pages.page_pmid_abstract import render as render_pmid_abstract
-from ui_pages.page_physical_exam import render as render_physical_exam
+from ui_pages.page_bedside import render as render_physical_exam
+from ui_pages.page_pathways import render as render_pathways
 from ui_pages.page_reminders import render as render_reminders
 from ui_pages.page_rrt_meds import render as render_rrt_meds
 from ui_pages.page_search_pubmed import render as render_search_pubmed
@@ -33,6 +35,7 @@ from pages_shared import (
 st.set_page_config(page_title="PMID → Abstract", page_icon="📄", layout="wide")
 ensure_schema()
 ensure_guidelines_schema()
+ensure_pathways_schema()
 
 _qp = _get_query_params()
 _open_pmid = _clean_pmid(_qp_first(_qp, "pmid"))
@@ -152,10 +155,17 @@ if "active_section" not in st.session_state:
 def _on_nav_change() -> None:
     st.session_state["active_section"] = "nav"
     st.session_state["rr_page"] = None
+    st.session_state["pw_page"] = None
 
 
 def _on_rr_change() -> None:
     st.session_state["active_section"] = "rr"
+    st.session_state["pw_page"] = None
+
+
+def _on_pw_change() -> None:
+    st.session_state["active_section"] = "pw"
+    st.session_state["rr_page"] = None
 
 
 nav_page = st.sidebar.radio(
@@ -174,14 +184,26 @@ st.sidebar.caption(
 st.sidebar.markdown("---")
 
 rr_page = st.sidebar.radio(
-    "🚨 Rapid Reference",
+    "\U0001f6a8 Rapid Reference",
     _RR_PAGES,
     index=None,
     key="rr_page",
     on_change=_on_rr_change,
 )
 
-if st.session_state["active_section"] == "rr":
+st.sidebar.markdown("---")
+
+pw_page = st.sidebar.radio(
+    "\U0001f4cb Personalized Pathways",
+    ["Pathways"],
+    index=None,
+    key="pw_page",
+    on_change=_on_pw_change,
+)
+
+if st.session_state["active_section"] == "pw":
+    render_pathways()
+elif st.session_state["active_section"] == "rr":
     if rr_page == "RRT":
         render_rrt_meds()
     elif rr_page == "Bedside":
