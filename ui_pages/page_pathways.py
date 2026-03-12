@@ -72,6 +72,10 @@ def _tiebreaker_keys(item_type: str, item_id: str) -> tuple[int, int, int]:
     if not rec:
         return (0, 0, 0)
 
+    # year
+    raw_year = (rec.get("year") or "").strip()
+    year = int(raw_year) if raw_year.isdigit() else 0
+
     # patient_n — extract the first integer from the free-text field
     raw_n = (rec.get("patient_n") or "").strip()
     patient_n = 0
