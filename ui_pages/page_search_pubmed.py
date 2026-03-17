@@ -29,6 +29,9 @@ SPECIALTY_JOURNAL_TERMS = {
     "Internal Medicine": {
         "JAMA Internal Medicine": '"JAMA Intern Med"[Journal]',
         "JGIM": '"J Gen Intern Med"[Journal]',
+        "Journal of Hospital Medicine": '"J Hosp Med"[Journal]',
+        "American Journal of Medicine": '"Am J Med"[Journal]',
+        "Cochrane Systematic Reviews": '"Cochrane Database Syst Rev"[Journal]',
     },
     "Neurology": {
         "JAMA Neurology": '"JAMA Neurol"[Journal]',
@@ -98,6 +101,13 @@ SPECIALTY_JOURNAL_TERMS = {
         "Hepatology": '"Hepatology"[Journal]',
         "Journal of Hepatology": '"J Hepatol"[Journal]',
     },
+    "Open-Access": {
+        "JAMA Network Open": '"JAMA Netw Open"[Journal]',
+        "BMJ Open": '"BMJ Open"[Journal]',
+    },
+    "Palliative Care": {
+        "Journal of Pain and Symptom Management": '"J Pain Symptom Manage"[Journal]',
+    },
 }
 
 SPECIALTY_LEDGER_BG_COLORS = {
@@ -118,6 +128,8 @@ SPECIALTY_LEDGER_BG_COLORS = {
     "oncology": "#ffe2ea",
     "rheumatology": "#f3ecff",
     "hepatology": "#fef3d7",
+    "open-access": "#e8f5e9",
+    "palliative care": "#f3e5f5",
 }
 
 
