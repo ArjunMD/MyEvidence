@@ -1,7 +1,6 @@
 import streamlit as st
 
 from db import (
-    _db_path,
     db_count,
     db_count_all,
     ensure_guidelines_schema,

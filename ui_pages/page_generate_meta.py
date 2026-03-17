@@ -13,22 +13,11 @@ from db import (
 )
 from pages_shared import (
     META_MAX_STUDIES_HARD_CAP,
+    _dedupe_ids,
     _get_evidence_cart_ids,
     _set_evidence_cart_ids,
     gpt_generate_meta_combined,
 )
-
-
-def _dedupe_ids(values: List[str]) -> List[str]:
-    out: List[str] = []
-    seen = set()
-    for raw in (values or []):
-        v = str(raw or "").strip()
-        if not v or v in seen:
-            continue
-        seen.add(v)
-        out.append(v)
-    return out
 
 
 def _clip_to_cap(pmids: List[str], gids: List[str], max_allowed: int) -> Dict[str, List[str]]:

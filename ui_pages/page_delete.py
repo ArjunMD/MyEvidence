@@ -21,18 +21,7 @@ from db import (
     update_record,
 )
 from extract import _parse_nonneg_int, _parse_tag_list, _parse_year4
-
-
-def _dedupe_ids(values: List[str]) -> List[str]:
-    out: List[str] = []
-    seen = set()
-    for raw in (values or []):
-        v = str(raw or "").strip()
-        if not v or v in seen:
-            continue
-        seen.add(v)
-        out.append(v)
-    return out
+from pages_shared import _dedupe_ids
 
 
 def _clip_text(value: str, max_len: int = 90) -> str:
