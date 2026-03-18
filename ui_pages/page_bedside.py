@@ -112,6 +112,41 @@ def render() -> None:
                     "| **Cauda equina** (nerve roots below conus) | Large central disc herniation, tumor, epidural abscess | Asymmetric, flaccid LMN pattern; areflexic | Asymmetric saddle anesthesia; radicular pain common | Surgical emergency; prognosis depends on speed of decompression |"
                 )
 
+    with st.expander("Ventilator Dyssynchrony", expanded=False):
+        st.markdown(
+            "Ventilator dyssynchrony occurs when the patient's respiratory effort "
+            "and the ventilator's delivery of breaths are mismatched in timing, flow, "
+            "or volume. It increases work of breathing, causes patient distress, "
+            "worsens gas exchange, and can contribute to ventilator-induced lung injury (VILI).\n\n"
+            "### Trigger Dyssynchrony\n\n"
+            "| Type | What Happens | Waveform Clues | Management |\n"
+            "| --- | --- | --- | --- |\n"
+            "| **Ineffective triggering (missed triggers)** | Patient effort does not trigger a breath — the ventilator ignores the effort | Negative deflection on pressure waveform or flow deflection toward zero without a delivered breath; airway pressure dip without a corresponding volume delivery | Increase trigger sensitivity (lower pressure trigger or increase flow trigger sensitivity); reduce over-assistance that causes hyperinflation; reduce auto-PEEP by increasing expiratory time |\n"
+            "| **Auto-triggering** | Ventilator delivers a breath without patient effort — false trigger | Breaths delivered at regular intervals without preceding patient effort; may correlate with cardiac oscillations, circuit leak, or water in tubing | Decrease trigger sensitivity; check for circuit leaks, water in tubing, or cardiac oscillations; ensure appropriate PEEP |\n"
+            "| **Double triggering** | Two ventilator breaths delivered for a single patient effort — the second breath stacks on the first | Two consecutive breaths with very short expiratory time between them; the first breath appears truncated | Increase inspiratory time or tidal volume to match patient demand; consider increasing pressure support; may need to increase set Vt if patient demand exceeds delivery |\n"
+            "| **Reverse triggering** | Ventilator breath triggers a reflexive diaphragmatic contraction (entrainment) — passive patient, often deeply sedated | Breath is ventilator-initiated, but a second effort (pressure dip or flow distortion) appears during or at end of the machine breath; can cause breath-stacking | Reduce sedation to allow spontaneous triggering; or deepen sedation to abolish entrainment; consider changing mode |\n\n"
+            "### Flow Dyssynchrony\n\n"
+            "| Type | What Happens | Waveform Clues | Management |\n"
+            "| --- | --- | --- | --- |\n"
+            "| **Flow starvation (insufficient flow)** | Patient's inspiratory demand exceeds the set flow rate — the ventilator cannot deliver gas fast enough | Concave (scooped-out) appearance of the pressure-time waveform during inspiration; patient appears to be \"sucking\" against the ventilator | Increase peak inspiratory flow rate; switch from volume-control to pressure-control (flow is variable and demand-matched); consider pressure support mode |\n"
+            "| **Excessive flow** | Flow delivered is faster than the patient wants | Pressure overshoot or spike at the beginning of inspiration; convex (bulging) pressure waveform; patient may actively exhale against delivered flow | Decrease peak flow rate; switch to a decelerating flow pattern; consider pressure-targeted mode |\n\n"
+            "### Cycle Dyssynchrony\n\n"
+            "| Type | What Happens | Waveform Clues | Management |\n"
+            "| --- | --- | --- | --- |\n"
+            "| **Premature cycling (short inspiration)** | Ventilator terminates inspiration before the patient is done inhaling | Patient effort continues after the ventilator cycles to expiration — seen as a second negative pressure deflection or continued inspiratory flow after the machine cycles off; may cause double triggering | Increase inspiratory time (volume control) or decrease expiratory trigger sensitivity / cycle-off percentage (pressure support) |\n"
+            "| **Delayed cycling (prolonged inspiration)** | Ventilator inspiration continues after the patient wants to exhale | Active expiratory effort against ongoing ventilator inspiration — pressure spike at end of inspiration; expiratory flow begins while the ventilator is still delivering | Decrease inspiratory time (volume control) or increase expiratory trigger sensitivity / cycle-off percentage (pressure support); check for circuit leaks that prevent flow from decaying to the cycle threshold |\n\n"
+            "### Mode-Related Dyssynchrony\n\n"
+            "| Type | What Happens | Waveform Clues | Management |\n"
+            "| --- | --- | --- | --- |\n"
+            "| **Breath-stacking (auto-PEEP)** | Incomplete exhalation before the next breath — air trapping raises end-expiratory pressure | Expiratory flow does not return to zero before the next breath begins; progressive increase in plateau pressure; perform an expiratory hold to measure auto-PEEP | Decrease respiratory rate; decrease I:E ratio (shorten inspiration, lengthen expiration); reduce tidal volume; bronchodilators if obstructive; apply external PEEP to ~80% of measured auto-PEEP to reduce trigger threshold |\n\n"
+            "### Systematic Approach at the Bedside\n\n"
+            "1. **Look at the patient**: accessory muscle use, paradoxical breathing, diaphoresis, tachycardia, agitation\n"
+            "2. **Look at the waveforms**: pressure-time, flow-time, and volume-time — most dyssynchrony is visible on these\n"
+            "3. **Identify the phase**: is the problem in triggering, flow delivery, or cycling?\n"
+            "4. **Intervene on the ventilator first**: adjust trigger, flow, inspiratory time, or mode before reaching for sedation\n"
+            "5. **Sedation is not the first-line treatment for dyssynchrony** — fix the ventilator-patient mismatch. Sedation masks the problem and may worsen outcomes"
+        )
+
     with st.expander("Medications Incompatible with Lactated Ringer's", expanded=False):
         st.markdown(
             "Lactated Ringer's contains **calcium (Ca²⁺)**, which is the primary "
