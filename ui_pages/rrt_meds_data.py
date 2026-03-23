@@ -80,6 +80,22 @@ RRT_MED_GUIDE: Dict[str, Dict[str, object]] = {
                     "If the first attempt fails, escalate energy and ALWAYS Re-synchronize.",
                 ],
             },
+            {
+                "name": "VT mimics — wide-complex rhythms that are NOT VT",
+                "item_type": "procedure",
+                "summary": "Not every wide-complex tachycardia is VT. If the heart rate is <120, it cannot be VT. If the heart rate is <140, it is probably not VT. A wide QRS may indicate sodium channel blockade (including from hyperkalemia), and giving amiodarone, procainamide, or lidocaine to a VT mimic can kill the patient — these drugs further block sodium channels. When uncertain, giving sodium bicarbonate first is the safer move. The following can produce a wide QRS and be mistaken for VT at the bedside.",
+                "steps": [
+                    "SVT with aberrant conduction (rate-related bundle branch block): A supraventricular rhythm conducts with a transient BBB because one bundle is still refractory at fast rates. Clues: typical RBBB or LBBB morphology, preceding P-waves if visible, and the wide complex appears only at faster rates. Adenosine may terminate it.",
+                    "SVT with pre-existing bundle branch block: The patient already has a BBB at baseline, so any SVT (sinus tach, AFib, AFL, AVNRT) will look wide. Compare to the patient's baseline ECG — the QRS morphology should match.",
+                    "Antidromic AVRT (WPW with antegrade accessory pathway conduction): Impulse travels down the accessory pathway and up the AV node, producing a maximally pre-excited wide QRS. Regular and fast. Adenosine can be used cautiously. Avoid AV nodal blockers (diltiazem, verapamil, digoxin) if AFib with WPW is suspected — they can accelerate conduction down the bypass tract and degenerate to VF.",
+                    "Atrial fibrillation with WPW: Irregularly irregular wide-complex tachycardia with varying QRS morphology (some beats more pre-excited than others). This is a life-threatening mimic — AV nodal blockers are contraindicated. Treat with procainamide or cardioversion.",
+                    "Hyperkalemia with sinus tachycardia: Severe hyperkalemia (K >7) widens the QRS progressively, eventually producing a sine-wave pattern that can mimic VT. Look for peaked T-waves, loss of P-waves, and clinical context (renal failure, missed dialysis). Treat the potassium, not the rhythm.",
+                    "Sodium channel blocker toxicity (TCA, flecainide, cocaine): Can they be suicidal? Widens the QRS by slowing phase 0 depolarization. The wide QRS tachycardia may look bizarre and not fit any standard VT morphology. History of overdose, QRS >100 ms at baseline, rightward axis shift. Treat with sodium bicarbonate boluses.",
+                    "Ventricular paced rhythm: If the pacemaker is tracking a fast atrial rate (PMT or sensor-driven), the paced wide QRS at a rapid rate can mimic VT. Look for pacing spikes. Apply a magnet to switch to asynchronous pacing — if the rate changes, it was pacemaker-mediated.",
+                    "Artifact / lead noise: Movement artifact, tremor (Parkinson's), or loose leads can produce pseudo-wide-complex tachycardia on the monitor. The patient is usually hemodynamically stable and unbothered. Check a 12-lead ECG and feel for a pulse that matches the displayed rate.",
+                ],
+                "cautions": "When in doubt, treat as VT — it is the safest default. VT is by far the most common cause of wide-complex tachycardia in adults, especially with structural heart disease. However, recognizing mimics prevents unnecessary shocks, inappropriate drugs (e.g., amiodarone for SVT with aberrancy), and dangerous errors (e.g., verapamil for AFib with WPW).",
+            },
         ],
     },
     "Status Epilepticus": {

@@ -836,7 +836,7 @@ def _lookup_infections(query: str) -> list[tuple[str, str]]:
 
 
 def render() -> None:
-    st.title("📝 Reminders")
+    st.title("📝 Infectious Disease")
 
     with st.expander("Endemic Infections", expanded=False):
         # --- location lookup inside expander ---
