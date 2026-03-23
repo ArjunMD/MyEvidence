@@ -147,6 +147,7 @@ _CLOUD_HIDDEN_PAGES = {
     "Guidelines (PDF Upload)",
     "Search PubMed",
     "Manage",
+    "About",
 }
 
 _NAV_PAGES_ALL = [
