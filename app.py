@@ -26,6 +26,7 @@ from ui_pages.page_reminders_neuro import render as render_reminders_neuro
 from ui_pages.page_reminders_pulm import render as render_reminders_pulm
 from ui_pages.page_reminders_nephro import render as render_reminders_nephro
 from ui_pages.page_reminders_gi import render as render_reminders_gi
+from ui_pages.page_reminders_onc import render as render_reminders_onc
 from ui_pages.page_rrt_meds import render as render_rrt_meds
 from ui_pages.page_search_pubmed import render as render_search_pubmed
 from pages_shared import (
@@ -173,6 +174,7 @@ _RM_PAGES = [
     "Pulm / Critical Care",
     "Nephrology",
     "GI",
+    "Oncology",
 ]
 
 if "active_section" not in st.session_state:
@@ -264,6 +266,8 @@ elif st.session_state["active_section"] == "rm":
         render_reminders_nephro()
     elif rm_page == "GI":
         render_reminders_gi()
+    elif rm_page == "Oncology":
+        render_reminders_onc()
 elif st.session_state["active_section"] == "rr":
     if rr_page == "RRT":
         render_rrt_meds()
