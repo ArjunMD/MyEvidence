@@ -60,8 +60,6 @@ _LOE_HINT_RE = re.compile(
     r"(?i)\b(level of evidence|loe|class\b|grade\b|grading\b|certainty|strong recommendation|conditional recommendation)\b"
 )
 
-META_MAX_CHARS_PER_STUDY = 10000
-
 _GUIDELINE_YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
 _PUBMED_MONTH_NAME_TO_NUM = {
@@ -2506,68 +2504,3 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
     )
 
     return {"guideline_name": final_name, "pub_year": final_year, "specialty": final_spec}
-
-
-# ---------------- Meta synthesis ----------------
-def _pack_study_for_meta(rec: Dict[str, str], idx: int, include_abstract: bool) -> str:
-    title = (rec.get("title") or "").strip()
-    journal = (rec.get("journal") or "").strip()
-    year = (rec.get("year") or "").strip()
-    pmid = (rec.get("pmid") or "").strip()
-
-    header_bits = [b for b in [journal, year] if b]
-    header = f"STUDY {idx}: {title or '(no title)'}" + (f" ({' • '.join(header_bits)})" if header_bits else "")
-    header += f" | PMID {pmid}" if pmid else ""
-
-    lines: List[str] = [header]
-
-    # Mutually exclusive: either send raw abstract OR send extracted structured fields.
-    if include_abstract:
-        ab = (rec.get("abstract") or "").strip()
-        if ab:
-            ab = ab[: max(0, META_MAX_CHARS_PER_STUDY)]
-            lines.append("- Abstract (truncated):")
-            lines.append(ab)
-        else:
-            # Fall back to extracted fields if the abstract is missing.
-            include_abstract = False
-
-    if not include_abstract:
-        n = (rec.get("patient_n") or "").strip()
-        if n:
-            lines.append(f"- N: {n}")
-
-        design = (rec.get("study_design") or "").strip()
-        if design:
-            lines.append(f"- Design/setting tags: {design}")
-
-        p = (rec.get("patient_details") or "").strip()
-        if p:
-            lines.append("- Population:")
-            for ln in p.splitlines():
-                ln = ln.strip()
-                if ln:
-                    lines.append(f"  {ln if ln.startswith('- ') else ('- ' + ln)}")
-
-        ic = (rec.get("intervention_comparison") or "").strip()
-        if ic:
-            lines.append("- Intervention/comparator:")
-            for ln in ic.splitlines():
-                ln = ln.strip()
-                if ln:
-                    lines.append(f"  {ln if ln.startswith('- ') else ('- ' + ln)}")
-
-        res = (rec.get("results") or "").strip()
-        if res:
-            lines.append("- Results:")
-            for ln in res.splitlines():
-                ln = ln.strip()
-                if ln:
-                    lines.append(f"  {ln if ln.startswith('- ') else ('- ' + ln)}")
-
-        concl = (rec.get("authors_conclusions") or "").strip()
-        if concl:
-            lines.append(f"- Authors’ conclusion (from abstract): {concl}")
-
-    packed = "\n".join(lines).strip()
-    return packed[: max(0, META_MAX_CHARS_PER_STUDY)]

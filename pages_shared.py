@@ -7,29 +7,13 @@ from urllib.parse import quote_plus
 import streamlit as st
 
 from db import (
-    add_evidence_cart_items,
-    clear_evidence_cart,
-    get_evidence_cart_item_ids,
-    get_guideline_meta,
-    get_guideline_recommendations_display,
     get_hidden_pubmed_pmids,
-    get_record,
     get_saved_pmids,
-    remove_evidence_cart_items,
-)
-from extract import (
-    OPENAI_RESPONSES_URL,
-    _extract_output_text,
-    _openai_api_key,
-    _openai_model,
-    _pack_study_for_meta,
-    _post_with_retries,
 )
 
 SEARCH_MAX_DEFAULT = 1500
 BROWSE_MAX_ROWS = 30000
 GUIDELINES_MAX_LIST = 30000
-META_MAX_STUDIES_HARD_CAP = 30000
 
 _REC_LINE_RE = re.compile(r"^\s*(?:-\s+)?\*\*(?:Rec\s+)?(\d+)\.\*\*\s*(.*)$")
 
@@ -264,194 +248,6 @@ def _guideline_md_with_delete_links(md: str, gid: str) -> str:
     return pat.sub(repl, base)
 
 
-def _dedupe_ids(values: List[str]) -> List[str]:
-    out: List[str] = []
-    seen = set()
-    for raw in (values or []):
-        v = str(raw or "").strip()
-        if not v or v in seen:
-            continue
-        seen.add(v)
-        out.append(v)
-    return out
-
-
-def _get_evidence_cart_ids() -> Dict[str, List[str]]:
-    cart = get_evidence_cart_item_ids()
-    pmids = _dedupe_ids(cart.get("pmids") or [])
-    gids = _dedupe_ids(cart.get("guideline_ids") or [])
-    return {"pmids": pmids, "guideline_ids": gids}
-
-
-def _set_evidence_cart_ids(pmids: List[str], guideline_ids: List[str]) -> None:
-    clear_evidence_cart()
-    add_evidence_cart_items(
-        pmids=_dedupe_ids(pmids or []),
-        guideline_ids=_dedupe_ids(guideline_ids or []),
-    )
-
-
-def _add_to_evidence_cart(*, pmid: str = "", gid: str = "") -> Dict[str, str]:
-    cleaned_pmid = _clean_pmid(pmid)
-    cleaned_gid = str(gid or "").strip()
-    stats = add_evidence_cart_items(
-        pmids=[cleaned_pmid] if cleaned_pmid else [],
-        guideline_ids=[cleaned_gid] if cleaned_gid else [],
-    )
-    paper_added = "1" if int(stats.get("papers_added") or "0") > 0 else "0"
-    guideline_added = "1" if int(stats.get("guidelines_added") or "0") > 0 else "0"
-    return {
-        "paper_added": paper_added,
-        "guideline_added": guideline_added,
-        "added_any": "1" if (paper_added == "1" or guideline_added == "1") else "0",
-    }
-
-
-def _remove_from_evidence_cart(*, pmid: str = "", gid: str = "") -> Dict[str, str]:
-    cleaned_pmid = _clean_pmid(pmid)
-    cleaned_gid = str(gid or "").strip()
-    stats = remove_evidence_cart_items(
-        pmids=[cleaned_pmid] if cleaned_pmid else [],
-        guideline_ids=[cleaned_gid] if cleaned_gid else [],
-    )
-    paper_removed = "1" if int(stats.get("papers_removed") or "0") > 0 else "0"
-    guideline_removed = "1" if int(stats.get("guidelines_removed") or "0") > 0 else "0"
-    return {
-        "paper_removed": paper_removed,
-        "guideline_removed": guideline_removed,
-        "removed_any": "1" if (paper_removed == "1" or guideline_removed == "1") else "0",
-    }
-
-
-def _clear_evidence_cart() -> None:
-    clear_evidence_cart()
-
-
-def _pack_guideline_for_meta(gid: str, idx: int, max_chars: int = 12000) -> str:
-    gid = (gid or "").strip()
-    if not gid:
-        return ""
-
-    meta = get_guideline_meta(gid) or {}
-    name = (meta.get("guideline_name") or meta.get("filename") or "").strip()
-    year = (meta.get("pub_year") or "").strip()
-    spec = (meta.get("specialty") or "").strip()
-
-    title = name or f"Guideline {gid}"
-    header_bits: List[str] = [b for b in [year, spec] if b]
-    header = f"GUIDELINE {idx}: {title}" + (f" ({' • '.join(header_bits)})" if header_bits else "")
-
-    disp = (get_guideline_recommendations_display(gid) or "").strip()
-    if not disp:
-        return header + "\n- (No saved recommendations display.)"
-
-    disp = disp[:max_chars] + ("…" if len(disp) > max_chars else "")
-    return f"{header}\n\n{disp}"
-
-
-def get_focused_question_instructions_lines() -> List[str]:
-    return [
-        "You are helping a clinician answer a focused clinical question using the provided studies and guidelines.",
-        "",
-        "Use exactly these sections in order:",
-        "",
-        "**Answer:** 1-2 sentences giving the best direct answer to the question.",
-        "",
-        "**Supporting evidence:**",
-        "- One bullet per key finding. Lead each bullet with the specific data (effect size, CI, OR/HR/RR, NNT, p-value, absolute risk, or percentage) before the narrative. Include sample size (N) when available.",
-        "- Cite source labels exactly as shown in SOURCES (e.g., STUDY 2; GUIDELINE 5).",
-        "",
-        "**Conflicting evidence or limitations:**",
-        "- One bullet per point. Include data when available.",
-        "- Only include if genuinely present; omit this section entirely if there are none.",
-        "",
-        "Hard rules:",
-        "- Use ONLY information in the provided sources. Do not invent or infer details.",
-        "- Do NOT claim a formal meta-analysis; this is a qualitative synthesis.",
-        "- If the evidence is conflicting or too heterogeneous to give a single answer, state the different possible answers with the supporting data for each.",
-        "- Be concise. No filler sentences, no restating the question, no introductory preamble.",
-    ]
-
-
-def gpt_generate_meta_combined(
-    pmids: List[str],
-    guideline_ids: List[str],
-    mode: str,
-    prompt_text: str,
-    include_abstract: bool,
-) -> str:
-    pmids = [p.strip() for p in (pmids or []) if p and p.strip()]
-    guideline_ids = [g.strip() for g in (guideline_ids or []) if g and g.strip()]
-    if not pmids and not guideline_ids:
-        return ""
-
-    blocks: List[str] = []
-    idx = 1
-    for p in pmids:
-        rec = get_record(p) or {"pmid": p}
-        try:
-            blocks.append(_pack_study_for_meta(rec, idx, include_abstract=include_abstract))
-            idx += 1
-        except Exception:
-            continue
-
-    for g in guideline_ids:
-        try:
-            blk = _pack_guideline_for_meta(g, idx)
-            if blk:
-                blocks.append(blk)
-                idx += 1
-        except Exception:
-            continue
-
-    if not blocks:
-        return ""
-
-    content_text = "\n\n".join(blocks).strip()
-    mode_clean = (mode or "").strip().lower()
-    prompt_text = (prompt_text or "").strip()
-
-    if mode_clean == "answer":
-        descriptor_line = f"Question: {prompt_text}" if prompt_text else "Question: (none provided)"
-    else:
-        descriptor_line = ""
-
-    instructions_lines: List[str] = []
-    if mode_clean == "answer":
-        instructions_lines.extend(get_focused_question_instructions_lines())
-
-    instructions = "\n".join(instructions_lines) + "\n"
-
-    if descriptor_line:
-        input_field = f"{descriptor_line}\n\nSOURCES:\n{content_text}\n\nNow write the output."
-    else:
-        input_field = f"SOURCES:\n{content_text}\n\nNow write the output."
-
-    key = _openai_api_key()
-    if not key:
-        raise RuntimeError("Missing OpenAI API key. Put OPENAI_API_KEY in .streamlit/secrets.toml.")
-
-    payload = {
-        "model": _openai_model(),
-        "instructions": instructions,
-        "input": input_field,
-        "text": {"verbosity": "low"},
-        "max_output_tokens": 10000,
-        "store": False,
-        "reasoning": {"effort": "medium"},
-    }
-
-    response = _post_with_retries(
-        OPENAI_RESPONSES_URL,
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        json=payload,
-        timeout=60,
-    )
-    response.raise_for_status()
-    out = _extract_output_text(response.json())
-    return (out or "").strip()
-
-
 def _qp_first(qp: dict, key: str) -> str:
     v = qp.get(key)
     if isinstance(v, list):
@@ -491,46 +287,6 @@ def _browse_search_link(*, pmid: str = "", gid: str = "") -> str:
             f"style='text-decoration:none; opacity:0.45; margin-left:0.35rem; font-size:0.9em;'>🔎</a>"
         )
     return ""
-
-
-def _browse_cart_context_suffix(*, browse_q: str, by_specialty: bool, guidelines_only: bool) -> str:
-    q = (browse_q or "").strip()
-    return (
-        f"&browse_q={quote_plus(q)}"
-        f"&browse_spec={'1' if bool(by_specialty) else '0'}"
-        f"&browse_guidelines={'1' if bool(guidelines_only) else '0'}"
-    )
-
-
-def _browse_cart_link(
-    *,
-    pmid: str = "",
-    gid: str = "",
-    in_cart: bool = False,
-    browse_q: str = "",
-    by_specialty: bool = False,
-    guidelines_only: bool = False,
-) -> str:
-    item_id = (pmid or gid or "").strip()
-    if not item_id:
-        return ""
-
-    if pmid:
-        param = "cart_remove_pmid" if in_cart else "cart_add_pmid"
-    else:
-        param = "cart_remove_gid" if in_cart else "cart_add_gid"
-
-    suffix = _browse_cart_context_suffix(
-        browse_q=browse_q,
-        by_specialty=by_specialty,
-        guidelines_only=guidelines_only,
-    )
-    icon = "➖" if in_cart else "➕"
-    title = "Remove from evidence cart" if in_cart else "Add to evidence cart"
-    return (
-        f"<a href='?{param}={quote_plus(item_id)}{suffix}' target='_self' title='{title}' "
-        f"style='text-decoration:none; opacity:0.55; margin-left:0.35rem; font-size:0.95em;'>{icon}</a>"
-    )
 
 
 def _format_date_added(iso_str: str) -> str:
