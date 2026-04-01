@@ -6,7 +6,6 @@ from db import (
     db_count,
     db_count_all,
     ensure_guidelines_schema,
-    ensure_pathways_schema,
     ensure_schema,
     guidelines_count,
 )
@@ -18,7 +17,6 @@ from ui_pages.page_guidelines import render as render_guidelines
 from ui_pages.page_history import render as render_history
 from ui_pages.page_pmid_abstract import render as render_pmid_abstract
 from ui_pages.page_bedside import render as render_physical_exam
-from ui_pages.page_pathways import render as render_pathways
 from ui_pages.page_reminders_id import render as render_reminders_id
 from ui_pages.page_reminders_cardiology import render as render_reminders_cardiology
 from ui_pages.page_reminders_neuro import render as render_reminders_neuro
@@ -38,7 +36,6 @@ from pages_shared import (
 st.set_page_config(page_title="PMID → Abstract", page_icon="📄", layout="wide")
 ensure_schema()
 ensure_guidelines_schema()
-ensure_pathways_schema()
 
 _qp = _get_query_params()
 _open_pmid = _clean_pmid(_qp_first(_qp, "pmid"))
@@ -120,31 +117,22 @@ def _on_nav_change() -> None:
     st.session_state["active_section"] = "nav"
     st.session_state["rr_page"] = None
     st.session_state["rm_page"] = None
-    st.session_state["pw_page"] = None
 
 
 def _on_rr_change() -> None:
     st.session_state["active_section"] = "rr"
     st.session_state["rm_page"] = None
-    st.session_state["pw_page"] = None
 
 
 def _on_rm_change() -> None:
     st.session_state["active_section"] = "rm"
     st.session_state["rr_page"] = None
-    st.session_state["pw_page"] = None
-
-
-def _on_pw_change() -> None:
-    st.session_state["active_section"] = "pw"
-    st.session_state["rr_page"] = None
-    st.session_state["rm_page"] = None
 
 
 _default_nav_index = _NAV_PAGES.index("Browse studies") if _IS_CLOUD else 0
 
 nav_page = st.sidebar.radio(
-    "Navigate",
+    "Research",
     _NAV_PAGES,
     index=_default_nav_index,
     key="nav_page",
@@ -176,19 +164,8 @@ rm_page = st.sidebar.radio(
     on_change=_on_rm_change,
 )
 
-st.sidebar.markdown("---")
 
-pw_page = st.sidebar.radio(
-    "\U0001f4cb Personalized Pathways",
-    ["Pathways"],
-    index=None,
-    key="pw_page",
-    on_change=_on_pw_change,
-)
-
-if st.session_state["active_section"] == "pw":
-    render_pathways()
-elif st.session_state["active_section"] == "rm":
+if st.session_state["active_section"] == "rm":
     if rm_page == "Infectious Disease":
         render_reminders_id()
     elif rm_page == "Cardiology":

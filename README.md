@@ -23,9 +23,6 @@ For clinicians who love Pubmed, but hate having 37 tabs open and trying to track
 - **Bedside**: Bedside reference for non-urgent scenarios. Includes various physical exams, for instance.
 - **Reminders**: Reference for classically difficult to remember facts. Saves a google search.
 
-### Personalized Pathways
-- **Pathways**: Write your own admission plans and daily progress plans. Drag in abstracts and guidelines, and the app auto-sorts them by evidence strength (guidelines first, then RCTs, cohort studies, etc.). Ties are broken by year, patient count, and multicenter status. To ensure you don't forget things while writing notes and entering orders.
-
 ## Evidence Workflows
 1. **Research a topic from one strong seed paper**
    - Find a relevant article in PubMed and copy its PMID.
