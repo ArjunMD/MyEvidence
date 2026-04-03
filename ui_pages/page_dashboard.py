@@ -2,22 +2,18 @@
 
 import re
 from collections import Counter
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from db import (
+    _connect_db,
     dashboard_hidden_per_journal,
-    dashboard_patient_n_values,
-    dashboard_recent_additions,
     dashboard_saved_per_journal,
-    dashboard_saved_per_year,
-    dashboard_saved_per_year_month,
     dashboard_saved_specialties,
     dashboard_study_design_distribution,
-    db_count,
 )
 
 # ── colour palette ──────────────────────────────────────────────────
@@ -108,43 +104,14 @@ def _group_study_designs(raw_rows: List[Dict]) -> Counter:
     for row in raw_rows:
         raw = (row.get("study_design") or "").strip().lower()
         if not raw:
-            counts["Not specified"] += 1
+            counts["Observational studies"] += 1
             continue
-        if "meta-analysis" in raw and "systematic review" in raw:
-            counts["Systematic review & meta-analysis"] += 1
-        elif "systematic review" in raw:
-            counts["Systematic review"] += 1
-        elif "meta-analysis" in raw:
-            counts["Meta-analysis"] += 1
+        if "systematic review" in raw or "meta-analysis" in raw:
+            counts["Systematic reviews & meta-analyses"] += 1
         elif "randomized" in raw:
-            if "double-blind" in raw or "placebo" in raw:
-                counts["Double-blind RCT"] += 1
-            elif "cluster" in raw:
-                counts["Cluster RCT"] += 1
-            else:
-                counts["Randomized controlled trial"] += 1
-        elif "cohort" in raw:
-            counts["Cohort study"] += 1
-        elif "cross-sectional" in raw:
-            counts["Cross-sectional study"] += 1
-        elif "case-control" in raw or "case control" in raw:
-            counts["Case-control study"] += 1
-        elif "case report" in raw or "case series" in raw:
-            counts["Case report / series"] += 1
-        elif "observational" in raw:
-            counts["Observational study"] += 1
-        elif "retrospective" in raw:
-            counts["Retrospective study"] += 1
-        elif "prospective" in raw:
-            counts["Prospective study"] += 1
-        elif "post hoc" in raw:
-            counts["Post-hoc analysis"] += 1
-        elif "network meta" in raw:
-            counts["Network meta-analysis"] += 1
-        elif "guideline" in raw or "consensus" in raw:
-            counts["Guideline / consensus"] += 1
+            counts["RCTs"] += 1
         else:
-            counts["Other"] += 1
+            counts["Observational studies"] += 1
     return counts
 
 
@@ -157,10 +124,6 @@ def render() -> None:
     hidden_per_journal = dashboard_hidden_per_journal()
     specialty_rows = dashboard_saved_specialties()
     study_design_rows = dashboard_study_design_distribution()
-    year_data = dashboard_saved_per_year()
-    year_month_data = dashboard_saved_per_year_month()
-    patient_ns = dashboard_patient_n_values()
-    recent_30 = dashboard_recent_additions(30)
 
     total_saved = sum(r["count"] for r in saved_per_journal)
     total_hidden = sum(r["count"] for r in hidden_per_journal)
@@ -168,24 +131,16 @@ def render() -> None:
     save_rate = (total_saved / total_reviewed * 100) if total_reviewed else 0
     n_journals = len([r for r in saved_per_journal if r["count"] > 0])
     specialty_counts = _explode_specialties(specialty_rows)
-    n_specialties = len([k for k in specialty_counts if k != "Unspecified"])
 
     # ════════════════════════════════════════════════════════════════
     # A. KPI METRICS
     # ════════════════════════════════════════════════════════════════
     st.markdown("### Overview")
-    k1, k2, k3, k4, k5 = st.columns(5)
+    k1, k2, k3, k4 = st.columns(4)
     k1.metric("Papers saved", f"{total_saved:,}")
     k2.metric("Papers reviewed", f"{total_reviewed:,}")
     k3.metric("Save rate", f"{save_rate:.1f}%")
     k4.metric("Journals", str(n_journals))
-    k5.metric("Specialties", str(n_specialties))
-
-    m1, m2 = st.columns(2)
-    m1.metric("Added (last 30 days)", str(recent_30))
-    if patient_ns:
-        median_n = sorted(patient_ns)[len(patient_ns) // 2]
-        m2.metric("Median sample size (n)", f"{median_n:,}")
 
     st.divider()
 
@@ -220,17 +175,13 @@ def render() -> None:
     st.divider()
 
     # ════════════════════════════════════════════════════════════════
-    # C. SAVED vs REVIEWED PER JOURNAL (grouped bar)
+    # D. SAVE RATE BY JOURNAL (bar chart)
     # ════════════════════════════════════════════════════════════════
-    st.markdown("### Saved vs reviewed per journal")
-    st.caption("Reviewed = saved + dismissed via 'Don't show again'")
-
     hidden_map: Dict[str, int] = {}
     for r in hidden_per_journal:
         key = _short_journal(r["journal"])
         hidden_map[key] = hidden_map.get(key, 0) + int(r["count"])
 
-    # Top journals by total reviewed
     journal_total_reviewed: Dict[str, int] = {}
     saved_map: Dict[str, int] = {}
     for r in saved_per_journal:
@@ -240,39 +191,6 @@ def render() -> None:
     all_journals = set(saved_map.keys()) | set(hidden_map.keys())
     for j in all_journals:
         journal_total_reviewed[j] = saved_map.get(j, 0) + hidden_map.get(j, 0)
-
-    top_reviewed = sorted(journal_total_reviewed.items(), key=lambda x: x[1], reverse=True)[:15]
-
-    if top_reviewed:
-        jr_names = [t[0] for t in reversed(top_reviewed)]
-        jr_saved = [saved_map.get(j, 0) for j in jr_names]
-        jr_hidden = [hidden_map.get(j, 0) for j in jr_names]
-
-        fig2 = go.Figure()
-        fig2.add_trace(go.Bar(
-            y=jr_names, x=jr_saved, name="Saved",
-            orientation="h", marker_color=_PRIMARY,
-        ))
-        fig2.add_trace(go.Bar(
-            y=jr_names, x=jr_hidden, name="Dismissed",
-            orientation="h", marker_color="#D4D4D4",
-        ))
-        fig2.update_layout(
-            barmode="stack",
-            template=_PLOTLY_TEMPLATE,
-            height=max(400, len(top_reviewed) * 32),
-            margin=dict(l=10, r=30, t=10, b=10),
-            xaxis_title="Articles",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            yaxis=dict(tickfont=dict(size=12)),
-        )
-        st.plotly_chart(fig2, width="stretch")
-
-    st.divider()
-
-    # ════════════════════════════════════════════════════════════════
-    # D. SAVE RATE BY JOURNAL (bar chart)
-    # ════════════════════════════════════════════════════════════════
     st.markdown("### Save rate by journal")
     st.caption("Among journals with at least 10 reviewed articles")
 
@@ -306,23 +224,6 @@ def render() -> None:
             yaxis=dict(tickfont=dict(size=12)),
         )
         st.plotly_chart(fig3, width="stretch")
-
-    # ── Lowest-yield journals ──
-    if rate_data:
-        lowest = sorted(rate_data, key=lambda x: x["rate"])
-        # Only show journals where save rate is meaningfully low
-        lowest = [r for r in lowest if r["rate"] < save_rate][:10]
-        if lowest:
-            st.markdown("#### Lowest save rates")
-            st.caption(
-                "Journals where you review the most articles relative to how many you save "
-                "(minimum 10 reviewed)"
-            )
-            for i, r in enumerate(lowest, 1):
-                st.markdown(
-                    f"{i}. **{r['journal']}** — {r['rate']:.1f}% save rate "
-                    f"({r['saved']} saved / {r['total']} reviewed)"
-                )
 
     st.divider()
 
@@ -399,185 +300,299 @@ def render() -> None:
     st.divider()
 
     # ════════════════════════════════════════════════════════════════
-    # G. PUBLICATION TIMELINE (area chart by year)
+    # G. JOURNAL TIERS
     # ════════════════════════════════════════════════════════════════
-    st.markdown("### Publication timeline")
-
-    if year_data:
-        years = [r["year"] for r in year_data]
-        counts_y = [r["count"] for r in year_data]
-        fig6 = go.Figure(go.Scatter(
-            x=years,
-            y=counts_y,
-            mode="lines+markers+text",
-            text=counts_y,
-            textposition="top center",
-            fill="tozeroy",
-            fillcolor="rgba(76, 120, 168, 0.15)",
-            line=dict(color=_PRIMARY, width=2.5),
-            marker=dict(size=8, color=_PRIMARY),
-        ))
-        fig6.update_layout(
-            template=_PLOTLY_TEMPLATE,
-            height=350,
-            margin=dict(l=10, r=10, t=10, b=10),
-            xaxis_title="Publication year",
-            yaxis_title="Papers saved",
-            xaxis=dict(type="category"),
-        )
-        st.plotly_chart(fig6, width="stretch")
-
-    # Monthly breakdown for recent years
-    _MONTH_NAMES = {
-        "01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr",
-        "05": "May", "06": "Jun", "07": "Jul", "08": "Aug",
-        "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec",
-    }
-    recent_years = sorted(
-        set(r["year"] for r in year_month_data if r["year"] in ("2025", "2026")),
-    )
-    if recent_years:
-        st.markdown("#### Monthly detail (recent years)")
-        fig7 = go.Figure()
-        for yr in recent_years:
-            monthly = [r for r in year_month_data if r["year"] == yr and r["pub_month"]]
-            months_sorted = sorted(monthly, key=lambda r: r["pub_month"])
-            x_labels = [_MONTH_NAMES.get(r["pub_month"], r["pub_month"]) for r in months_sorted]
-            y_vals = [r["count"] for r in months_sorted]
-            fig7.add_trace(go.Scatter(
-                x=x_labels, y=y_vals,
-                mode="lines+markers",
-                name=yr,
-                line=dict(width=2.5),
-                marker=dict(size=7),
-            ))
-        fig7.update_layout(
-            template=_PLOTLY_TEMPLATE,
-            height=300,
-            margin=dict(l=10, r=10, t=10, b=10),
-            xaxis_title="Month",
-            yaxis_title="Papers saved",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        st.plotly_chart(fig7, width="stretch")
-
-    st.divider()
-
-    # ════════════════════════════════════════════════════════════════
-    # H. PATIENT SAMPLE SIZES (histogram)
-    # ════════════════════════════════════════════════════════════════
-    st.markdown("### Patient sample sizes")
-
-    if patient_ns:
-        col_h1, col_h2 = st.columns([3, 1])
-
-        with col_h1:
-            fig8 = go.Figure(go.Histogram(
-                x=patient_ns,
-                nbinsx=40,
-                marker_color=_PRIMARY,
-                opacity=0.85,
-            ))
-            fig8.update_layout(
-                template=_PLOTLY_TEMPLATE,
-                height=300,
-                margin=dict(l=10, r=10, t=10, b=10),
-                xaxis_title="Number of patients (n)",
-                yaxis_title="Number of studies",
-            )
-            st.plotly_chart(fig8, width="stretch")
-
-        with col_h2:
-            sorted_ns = sorted(patient_ns)
-            total_n = len(sorted_ns)
-            q1 = sorted_ns[total_n // 4]
-            median_n = sorted_ns[total_n // 2]
-            q3 = sorted_ns[3 * total_n // 4]
-            st.markdown("#### Summary statistics")
-            st.markdown(f"**Studies with n** — {total_n}")
-            st.markdown(f"**Min** — {min(sorted_ns):,}")
-            st.markdown(f"**Q1** — {q1:,}")
-            st.markdown(f"**Median** — {median_n:,}")
-            st.markdown(f"**Q3** — {q3:,}")
-            st.markdown(f"**Max** — {max(sorted_ns):,}")
-            st.markdown(f"**Mean** — {sum(sorted_ns) // total_n:,}")
-    else:
-        st.info("No patient sample size data available.")
-
-    st.divider()
-
-    # ════════════════════════════════════════════════════════════════
-    # I. TOP SPECIALTY-JOURNAL COMBINATIONS
-    # ════════════════════════════════════════════════════════════════
-    st.markdown("### Top specialty-journal combinations")
-
-    spec_journal_counter: Counter = Counter()
-    for row in specialty_rows:
-        raw_spec = (row.get("specialty") or "").strip()
-        if not raw_spec:
-            continue
-        parts = re.split(r"[,;\|\n]+", raw_spec)
-        for p in parts:
-            s = p.strip()
-            if s:
-                spec_journal_counter[s] += 1
-
-    # Reuse saved_per_journal for journal info — fetch full records
-    # Actually, we need specialty-journal pairs. Query directly.
-    _render_specialty_journal_heatmap()
+    _render_journal_tiers()
 
 
-def _render_specialty_journal_heatmap() -> None:
-    """Specialty vs journal heatmap from raw abstracts data."""
-    from db import _connect_db
+# ── Journal tier system ────────────────────────────────────────────
 
+# Mapping: Search PubMed display label → DB journal name (lowercase).
+# DB names come from PubMed XML <Journal><Title> and can differ from display labels.
+_LABEL_TO_DB_JOURNAL: Dict[str, str] = {
+    "NEJM": "the new england journal of medicine",
+    "JAMA": "jama",
+    "Lancet": "lancet (london, england)",
+    "BMJ": "bmj (clinical research ed.)",
+    "Nat Med": "nature medicine",
+    "AIM": "annals of internal medicine",
+    "JAMA Internal Medicine": "jama internal medicine",
+    "JGIM": "journal of general internal medicine",
+    "Journal of Hospital Medicine": "journal of hospital medicine",
+    "American Journal of Medicine": "the american journal of medicine",
+    "Cochrane Systematic Reviews": "the cochrane database of systematic reviews",
+    "JAMA Neurology": "jama neurology",
+    "Lancet Neurology": "the lancet. neurology",
+    "Stroke": "stroke",
+    "Intensive Care Medicine": "intensive care medicine",
+    "Critical Care": "critical care (london, england)",
+    "Anesthesiology": "anesthesiology",
+    "JAMA Cardiology": "jama cardiology",
+    "Journal of the American College of Cardiology": "journal of the american college of cardiology",
+    "European Heart Journal": "european heart journal",
+    "Circulation": "circulation",
+    "Lancet Infectious Diseases": "the lancet. infectious diseases",
+    "Clinical Infectious Diseases": "clinical infectious diseases : an official publication of the infectious diseases society of america",
+    "Lancet Respiratory Medicine": "the lancet. respiratory medicine",
+    "American Journal of Respiratory and Critical Care Medicine": "american journal of respiratory and critical care medicine",
+    "CHEST": "chest",
+    "JAMA Surgery": "jama surgery",
+    "Annals of Surgery": "annals of surgery",
+    "JAMA Psychiatry": "jama psychiatry",
+    "Lancet Psychiatry": "the lancet. psychiatry",
+    "World Psychiatry": "world psychiatry",
+    "Lancet Gastroenterology & Hepatology": "the lancet. gastroenterology & hepatology",
+    "Gastroenterology": "gastroenterology",
+    "Gut": "gut",
+    "The American Journal of Gastroenterology": "the american journal of gastroenterology",
+    "Annals of Emergency Medicine": "annals of emergency medicine",
+    "Resuscitation": "resuscitation",
+    "Journal of the American Society of Nephrology": "journal of the american society of nephrology : jasn",
+    "Kidney International": "kidney international",
+    "American Journal of Kidney Diseases": "american journal of kidney diseases : the official journal of the national kidney foundation",
+    "Lancet Diabetes & Endocrinology": "the lancet. diabetes & endocrinology",
+    "Diabetes Care": "diabetes care",
+    "Journal of Clinical Endocrinology & Metabolism": "the journal of clinical endocrinology and metabolism",
+    "Lancet Haematology": "the lancet. haematology",
+    "Blood": "blood",
+    "JAMA Oncology": "jama oncology",
+    "Lancet Oncology": "the lancet. oncology",
+    "Journal of Clinical Oncology": "journal of clinical oncology : official journal of the american society of clinical oncology",
+    "Lancet Rheumatology": "the lancet. rheumatology",
+    "Annals of the Rheumatic Diseases": "annals of the rheumatic diseases",
+    "Hepatology": "hepatology (baltimore, md.)",
+    "Journal of Hepatology": "journal of hepatology",
+    "JAMA Network Open": "jama network open",
+    "BMJ Open": "bmj open",
+    "Journal of Pain and Symptom Management": "journal of pain and symptom management",
+}
+
+
+def _get_journal_counts() -> Dict[str, Tuple[int, int]]:
+    """Return {display_label: (saved_count, hidden_count)} for Search PubMed journals."""
     with _connect_db() as conn:
-        rows = conn.execute("SELECT specialty, journal FROM abstracts;").fetchall()
+        saved_rows = conn.execute(
+            "SELECT LOWER(TRIM(journal)) AS j, COUNT(*) AS cnt FROM abstracts "
+            "WHERE journal IS NOT NULL GROUP BY j;"
+        ).fetchall()
+        hidden_rows = conn.execute(
+            "SELECT LOWER(TRIM(journal)) AS j, COUNT(*) AS cnt FROM hidden_pubmed_pmids "
+            "WHERE journal IS NOT NULL GROUP BY j;"
+        ).fetchall()
 
-    pair_counter: Counter = Counter()
-    for r in rows:
-        raw_spec = (r["specialty"] or "").strip()
-        journal = _short_journal((r["journal"] or "").strip())
-        if not raw_spec:
-            raw_spec = "Unspecified"
-        parts = re.split(r"[,;\|\n]+", raw_spec)
-        for p in parts:
-            s = p.strip()
-            if s:
-                pair_counter[(s, journal)] += 1
+    saved_by_db: Dict[str, int] = {r["j"]: int(r["cnt"]) for r in saved_rows}
+    hidden_by_db: Dict[str, int] = {r["j"]: int(r["cnt"]) for r in hidden_rows}
 
-    if not pair_counter:
+    result: Dict[str, Tuple[int, int]] = {}
+    for label, db_key in _LABEL_TO_DB_JOURNAL.items():
+        s = saved_by_db.get(db_key, 0)
+        h = hidden_by_db.get(db_key, 0)
+        result[label] = (s, h)
+    return result
+
+
+def _compute_journal_tiers() -> Optional[Dict[int, List[Dict]]]:
+    """Compute 5 tiers of journals using the W/X/Y/Z optimization algorithm.
+
+    Returns {1: [...], 2: [...], 3: [...], 4: [...], 5: [...]} where each
+    value is a list of dicts with keys: label, saved, reviewed, rate.
+    """
+    counts = _get_journal_counts()
+    if not counts:
+        return None
+
+    N = len(counts)
+    target = N / 5.0
+
+    # Build journal data
+    journals: List[Dict] = []
+    for label, (saved, hidden) in counts.items():
+        reviewed = saved + hidden
+        rate = (saved / reviewed) if reviewed > 0 else 0.0
+        journals.append({
+            "label": label,
+            "saved": saved,
+            "reviewed": reviewed,
+            "rate": rate,
+        })
+
+    # List A: ranked by saved count desc, tiebreaker: higher rate
+    list_a = sorted(journals, key=lambda j: (j["saved"], j["rate"]), reverse=True)
+    # List B: ranked by save rate desc, tiebreaker: higher saved count
+    list_b = sorted(journals, key=lambda j: (j["rate"], j["saved"]), reverse=True)
+
+    # Assign ranks (0-indexed)
+    rank_a: Dict[str, int] = {j["label"]: i for i, j in enumerate(list_a)}
+    rank_b: Dict[str, int] = {j["label"]: i for i, j in enumerate(list_b)}
+
+    labels = [j["label"] for j in journals]
+    label_set = set(labels)
+
+    # For each journal, store (rank_a, rank_b)
+    pairs = {la: (rank_a[la], rank_b[la]) for la in labels}
+
+    # Precompute 2D prefix sums for fast overlap counting.
+    # Grid cell [ra][rb] = 1 if a journal has that (rank_a, rank_b) pair.
+    grid = [[0] * (N + 2) for _ in range(N + 2)]
+    for la in labels:
+        ra, rb = pairs[la]
+        grid[ra + 1][rb + 1] = 1
+    # prefix[i][j] = count of journals with rank_a < i AND rank_b < j
+    prefix = [[0] * (N + 2) for _ in range(N + 2)]
+    for i in range(1, N + 2):
+        for j2 in range(1, N + 2):
+            prefix[i][j2] = (
+                grid[i][j2]
+                + prefix[i - 1][j2]
+                + prefix[i][j2 - 1]
+                - prefix[i - 1][j2 - 1]
+            )
+
+    def _count_rect(ra_lo: int, ra_hi: int, rb_lo: int, rb_hi: int) -> int:
+        """Count journals with ra_lo <= rank_a < ra_hi AND rb_lo <= rank_b < rb_hi."""
+        if ra_lo >= ra_hi or rb_lo >= rb_hi:
+            return 0
+        return (
+            prefix[ra_hi][rb_hi]
+            - prefix[ra_lo][rb_hi]
+            - prefix[ra_hi][rb_lo]
+            + prefix[ra_lo][rb_lo]
+        )
+
+    best_score = float("inf")
+    best_wxyz: Tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    for W in range(0, N + 1):
+        for X in range(0, N + 1):
+            # tier1 = rank_a < W AND rank_b < X
+            t1 = _count_rect(0, W, 0, X)
+            top_union = W + X - t1
+            t2 = top_union - t1
+
+            for Y in range(0, N - W + 1):
+                for Z in range(0, N - X + 1):
+                    # tier5 = rank_a >= N-Y AND rank_b >= N-Z
+                    t5 = _count_rect(N - Y, N, N - Z, N)
+                    bot_union = Y + Z - t5
+                    t4 = bot_union - t5
+
+                    # Cross-dimension overlap:
+                    # journals in top (rank_a<W OR rank_b<X) AND
+                    #   bot (rank_a>=N-Y OR rank_b>=N-Z)
+                    # Since W+Y<=N → rank_a<W and rank_a>=N-Y are disjoint.
+                    # Since X+Z<=N → rank_b<X and rank_b>=N-Z are disjoint.
+                    # Overlap = (rank_a<W AND rank_b>=N-Z)
+                    #         + (rank_b<X AND rank_a>=N-Y)
+                    cross = (
+                        _count_rect(0, W, N - Z, N)
+                        + _count_rect(N - Y, N, 0, X)
+                    )
+                    if cross > 0:
+                        continue
+
+                    t3 = N - top_union - bot_union
+                    if t3 < 0:
+                        continue
+
+                    sizes = [t1, t2, t3, t4, t5]
+                    score = sum((s - target) ** 2 for s in sizes)
+
+                    if score < best_score:
+                        best_score = score
+                        best_wxyz = (W, X, Y, Z)
+
+    W, X, Y, Z = best_wxyz
+    top_a = {la for la in labels if rank_a[la] < W}
+    top_b = {la for la in labels if rank_b[la] < X}
+    bot_a = {la for la in labels if rank_a[la] >= N - Y}
+    bot_b = {la for la in labels if rank_b[la] >= N - Z}
+
+    tier1 = top_a & top_b
+    tier2 = (top_a | top_b) - tier1
+    tier5 = bot_a & bot_b
+    tier4 = (bot_a | bot_b) - tier5
+    tier3 = set(labels) - (tier1 | tier2) - (tier4 | tier5)
+
+    # Build lookup
+    jdata = {j["label"]: j for j in journals}
+
+    def _tier_list(s: set) -> List[Dict]:
+        return sorted(
+            [jdata[la] for la in s],
+            key=lambda j: (j["saved"], j["rate"]),
+            reverse=True,
+        )
+
+    return {
+        1: _tier_list(tier1),
+        2: _tier_list(tier2),
+        3: _tier_list(tier3),
+        4: _tier_list(tier4),
+        5: _tier_list(tier5),
+    }
+
+
+_TIER_COLORS = {
+    1: "#1a7431",  # dark green
+    2: "#4CAF50",  # green
+    3: "#757575",  # neutral grey
+    4: "#EF6C00",  # orange
+    5: "#C62828",  # red
+}
+
+_TIER_LABELS = {
+    1: "Tier 1",
+    2: "Tier 2",
+    3: "Tier 3",
+    4: "Tier 4",
+    5: "Tier 5",
+}
+
+
+def _render_journal_tiers() -> None:
+    st.markdown("### Journal tiers")
+    st.caption(
+        "Journals ranked into 5 tiers based on how many papers you save (volume) "
+        "and what fraction you save (rate). Tier 1 = highest on both dimensions."
+    )
+
+    if st.button("Compute tiers", key="dashboard_compute_tiers"):
+        with st.spinner("Computing journal tiers..."):
+            st.session_state["dashboard_journal_tiers"] = _compute_journal_tiers()
+
+    tiers = st.session_state.get("dashboard_journal_tiers")
+    if not tiers:
+        st.info("Click **Compute tiers** to generate journal tier rankings.")
         return
 
-    # Top 10 specialties and top 10 journals by count
-    spec_totals: Counter = Counter()
-    journal_totals: Counter = Counter()
-    for (s, j), c in pair_counter.items():
-        spec_totals[s] += c
-        journal_totals[j] += c
+    for tier_num in (1, 2, 3, 4, 5):
+        journals = tiers.get(tier_num, [])
+        color = _TIER_COLORS[tier_num]
+        label = _TIER_LABELS[tier_num]
 
-    top_specs = [s for s, _ in spec_totals.most_common(10)]
-    top_journals = [j for j, _ in journal_totals.most_common(10)]
+        st.markdown(
+            f"<div style='border-left: 4px solid {color}; padding-left: 12px; margin-bottom: 8px;'>"
+            f"<strong style='color: {color}; font-size: 1.1em;'>{label}</strong>"
+            f"<span style='color: #888; margin-left: 8px;'>({len(journals)} journals)</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
-    z_data = []
-    for spec in top_specs:
-        row = [pair_counter.get((spec, j), 0) for j in top_journals]
-        z_data.append(row)
+        if journals:
+            rows_md = []
+            for j in journals:
+                rate_str = f"{j['rate'] * 100:.1f}%" if j["reviewed"] > 0 else "—"
+                rows_md.append(
+                    f"| {j['label']} | {j['saved']} | {j['reviewed']} | {rate_str} |"
+                )
+            table = (
+                "| Journal | Saved | Reviewed | Save rate |\n"
+                "|:--------|------:|---------:|----------:|\n"
+                + "\n".join(rows_md)
+            )
+            st.markdown(table)
+        else:
+            st.caption("*(none)*")
 
-    fig = go.Figure(go.Heatmap(
-        z=z_data,
-        x=top_journals,
-        y=top_specs,
-        colorscale="Blues",
-        text=z_data,
-        texttemplate="%{text}",
-        hovertemplate="<b>%{y}</b> + <b>%{x}</b><br>Papers: %{z}<extra></extra>",
-    ))
-    fig.update_layout(
-        template=_PLOTLY_TEMPLATE,
-        height=400,
-        margin=dict(l=10, r=10, t=10, b=80),
-        xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
-        yaxis=dict(tickfont=dict(size=12)),
-    )
-    st.plotly_chart(fig, width="stretch")
+        st.markdown("")
+
