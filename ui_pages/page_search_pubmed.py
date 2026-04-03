@@ -46,6 +46,7 @@ SPECIALTY_JOURNAL_TERMS = {
     "Critical care": {
         "Intensive Care Medicine": '"Intensive Care Med"[Journal]',
         "Critical Care": '"Crit Care"[Journal]',
+        "Anesthesiology": '"Anesthesiology"[Journal]',
     },
     "Cardiology": {
         "JAMA Cardiology": '"JAMA Cardiol"[Journal]',
@@ -75,6 +76,7 @@ SPECIALTY_JOURNAL_TERMS = {
         "Lancet Gastroenterology & Hepatology": '"Lancet Gastroenterol Hepatol"[Journal]',
         "Gastroenterology": '"Gastroenterology"[Journal]',
         "Gut": '"Gut"[Journal]',
+        "The American Journal of Gastroenterology": '"Am J Gastroenterol"[Journal]',
     },
     "Emergency Medicine": {
         "Annals of Emergency Medicine": '"Ann Emerg Med"[Journal]',
@@ -83,6 +85,7 @@ SPECIALTY_JOURNAL_TERMS = {
     "Nephrology": {
         "Journal of the American Society of Nephrology": '"J Am Soc Nephrol"[Journal]',
         "Kidney International": '"Kidney Int"[Journal]',
+        "American Journal of Kidney Diseases": '"Am J Kidney Dis"[Journal]',
     },
     "Endocrinology/Diabetes": {
         "Lancet Diabetes & Endocrinology": '"Lancet Diabetes Endocrinol"[Journal]',
@@ -879,7 +882,15 @@ def render() -> None:
                         key=f"search_pubmed_hide_{pmid}",
                         use_container_width=True,
                     ):
-                        hide_pubmed_pmid(pmid)
+                        _ym_parts = (ym_key or "").split("-")
+                        _hide_year = _ym_parts[0] if len(_ym_parts) >= 1 else ""
+                        _hide_month = _ym_parts[1] if len(_ym_parts) >= 2 else ""
+                        hide_pubmed_pmid(
+                            pmid,
+                            journal=journal_label,
+                            year=_hide_year,
+                            pub_month=_hide_month,
+                        )
                         st.rerun()
                 with b2:
                     if st.button(

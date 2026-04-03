@@ -75,10 +75,18 @@ def ensure_schema() -> None:
             """
             CREATE TABLE IF NOT EXISTS hidden_pubmed_pmids (
                 pmid TEXT PRIMARY KEY,
-                hidden_at TEXT NOT NULL
+                hidden_at TEXT NOT NULL,
+                journal TEXT,
+                year TEXT,
+                pub_month TEXT
             );
             """
         )
+        for col in ("journal TEXT", "year TEXT", "pub_month TEXT"):
+            try:
+                conn.execute(f"ALTER TABLE hidden_pubmed_pmids ADD COLUMN {col};")
+            except sqlite3.OperationalError:
+                pass
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS search_pubmed_ledger (
@@ -186,18 +194,29 @@ def get_saved_pmids(pmids: List[str]) -> Set[str]:
     return {(r["pmid"] or "").strip() for r in rows if (r["pmid"] or "").strip()}
 
 
-def hide_pubmed_pmid(pmid: str) -> None:
+def hide_pubmed_pmid(
+    pmid: str,
+    journal: Optional[str] = None,
+    year: Optional[str] = None,
+    pub_month: Optional[str] = None,
+) -> None:
     p = (pmid or "").strip()
     if not p:
         return
+    j = (journal or "").strip() or None
+    y = (year or "").strip() or None
+    m = (pub_month or "").strip() or None
     with _connect_db() as conn:
         conn.execute(
             """
-            INSERT INTO hidden_pubmed_pmids (pmid, hidden_at)
-            VALUES (?, ?)
-            ON CONFLICT(pmid) DO NOTHING;
+            INSERT INTO hidden_pubmed_pmids (pmid, hidden_at, journal, year, pub_month)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(pmid) DO UPDATE SET
+                journal=COALESCE(excluded.journal, hidden_pubmed_pmids.journal),
+                year=COALESCE(excluded.year, hidden_pubmed_pmids.year),
+                pub_month=COALESCE(excluded.pub_month, hidden_pubmed_pmids.pub_month);
             """,
-            (p, _utc_iso_z()),
+            (p, _utc_iso_z(), j, y, m),
         )
 
 
@@ -1011,5 +1030,90 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
         )
     return gout
 
+
+# ---------------- Dashboard queries ----------------
+
+def dashboard_saved_per_journal() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            "SELECT journal, COUNT(*) AS cnt FROM abstracts GROUP BY journal ORDER BY cnt DESC;"
+        ).fetchall()
+    return [{"journal": (r["journal"] or "").strip() or "Unknown", "count": int(r["cnt"])} for r in rows]
+
+
+def dashboard_hidden_per_journal() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            "SELECT journal, COUNT(*) AS cnt FROM hidden_pubmed_pmids GROUP BY journal ORDER BY cnt DESC;"
+        ).fetchall()
+    return [{"journal": (r["journal"] or "").strip() or "Unknown", "count": int(r["cnt"])} for r in rows]
+
+
+def dashboard_saved_per_year_month() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT year, pub_month, COUNT(*) AS cnt
+            FROM abstracts
+            WHERE year IS NOT NULL AND year != ''
+            GROUP BY year, pub_month
+            ORDER BY year ASC, pub_month ASC;
+            """
+        ).fetchall()
+    return [
+        {
+            "year": (r["year"] or "").strip(),
+            "pub_month": (r["pub_month"] or "").strip(),
+            "count": int(r["cnt"]),
+        }
+        for r in rows
+    ]
+
+
+def dashboard_study_design_distribution() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            "SELECT study_design, COUNT(*) AS cnt FROM abstracts GROUP BY study_design ORDER BY cnt DESC;"
+        ).fetchall()
+    return [{"study_design": (r["study_design"] or "").strip() or "Not specified", "count": int(r["cnt"])} for r in rows]
+
+
+def dashboard_saved_specialties() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute("SELECT specialty FROM abstracts;").fetchall()
+    return [{"specialty": (r["specialty"] or "").strip()} for r in rows]
+
+
+def dashboard_patient_n_values() -> List[Optional[int]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            "SELECT patient_n FROM abstracts WHERE patient_n IS NOT NULL AND patient_n > 0;"
+        ).fetchall()
+    return [int(r["patient_n"]) for r in rows]
+
+
+def dashboard_recent_additions(days: int = 30) -> int:
+    with _connect_db() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS cnt FROM abstracts
+            WHERE uploaded_at IS NOT NULL
+              AND uploaded_at >= datetime('now', ?);
+            """,
+            (f"-{int(days)} days",),
+        ).fetchone()
+    return int(row["cnt"]) if row else 0
+
+
+def dashboard_saved_per_year() -> List[Dict[str, object]]:
+    with _connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT year, COUNT(*) AS cnt FROM abstracts
+            WHERE year IS NOT NULL AND year != ''
+            GROUP BY year ORDER BY year ASC;
+            """
+        ).fetchall()
+    return [{"year": (r["year"] or "").strip(), "count": int(r["cnt"])} for r in rows]
 
 

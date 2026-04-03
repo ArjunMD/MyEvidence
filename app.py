@@ -25,6 +25,7 @@ from ui_pages.page_reminders_nephro import render as render_reminders_nephro
 from ui_pages.page_reminders_gi import render as render_reminders_gi
 from ui_pages.page_reminders_onc import render as render_reminders_onc
 from ui_pages.page_rrt_meds import render as render_rrt_meds
+from ui_pages.page_dashboard import render as render_dashboard
 from ui_pages.page_search_pubmed import render as render_search_pubmed
 from pages_shared import (
     _clean_pmid,
@@ -91,6 +92,7 @@ _NAV_PAGES_ALL = [
     "Single-study view",
     "Search PubMed",
     "Manage",
+    "Dashboard",
     "About",
     "History",
 ]
@@ -197,6 +199,8 @@ elif nav_page == "Search PubMed":
     render_search_pubmed()
 elif nav_page == "Manage":
     render_delete()
+elif nav_page == "Dashboard":
+    render_dashboard()
 elif nav_page == "About":
     render_about()
 elif nav_page == "History":
