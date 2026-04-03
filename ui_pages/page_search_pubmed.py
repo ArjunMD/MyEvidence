@@ -16,6 +16,11 @@ COMBINED_PUBLICATION_TYPE_TERMS = [
     '"Clinical Trial"[Publication Type]',
     '"Meta-Analysis"[Publication Type]',
     '"Systematic Review"[Publication Type]',
+    '"Observational Study"[Publication Type]',
+    '"Multicenter Study"[Publication Type]',
+    '"Comparative Study"[Publication Type]',
+    '"Clinical Study"[Publication Type]',
+    '"Validation Study"[Publication Type]',
 ]
 SPECIALTY_JOURNAL_TERMS = {
     "General": {

@@ -106,6 +106,12 @@ def ensure_schema() -> None:
             ON search_pubmed_ledger(last_checked_at DESC);
             """
         )
+        # One-time migration: reset ledger after broadening publication type filter
+        try:
+            conn.execute("ALTER TABLE search_pubmed_ledger ADD COLUMN _v2_broadened_reset INTEGER DEFAULT 1;")
+            conn.execute("DELETE FROM search_pubmed_ledger;")
+        except sqlite3.OperationalError:
+            pass  # migration already ran
 
 
 def save_record(
