@@ -215,7 +215,7 @@ def render() -> None:
             xaxis_title="Papers saved",
             yaxis=dict(tickfont=dict(size=12)),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.divider()
 
@@ -266,7 +266,7 @@ def render() -> None:
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             yaxis=dict(tickfont=dict(size=12)),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     st.divider()
 
@@ -305,7 +305,24 @@ def render() -> None:
             xaxis=dict(range=[0, max(r["rate"] for r in top_rates) * 1.3]),
             yaxis=dict(tickfont=dict(size=12)),
         )
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(fig3, width="stretch")
+
+    # ── Lowest-yield journals ──
+    if rate_data:
+        lowest = sorted(rate_data, key=lambda x: x["rate"])
+        # Only show journals where save rate is meaningfully low
+        lowest = [r for r in lowest if r["rate"] < save_rate][:10]
+        if lowest:
+            st.markdown("#### Lowest save rates")
+            st.caption(
+                "Journals where you review the most articles relative to how many you save "
+                "(minimum 10 reviewed)"
+            )
+            for i, r in enumerate(lowest, 1):
+                st.markdown(
+                    f"{i}. **{r['journal']}** — {r['rate']:.1f}% save rate "
+                    f"({r['saved']} saved / {r['total']} reviewed)"
+                )
 
     st.divider()
 
@@ -337,7 +354,7 @@ def render() -> None:
             height=500,
             margin=dict(l=10, r=10, t=10, b=10),
         )
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4, width="stretch")
 
     st.divider()
 
@@ -369,7 +386,7 @@ def render() -> None:
                 margin=dict(l=10, r=10, t=10, b=10),
                 showlegend=False,
             )
-            st.plotly_chart(fig5, use_container_width=True)
+            st.plotly_chart(fig5, width="stretch")
 
     with col_design_table:
         st.markdown("### Breakdown")
@@ -408,7 +425,7 @@ def render() -> None:
             yaxis_title="Papers saved",
             xaxis=dict(type="category"),
         )
-        st.plotly_chart(fig6, use_container_width=True)
+        st.plotly_chart(fig6, width="stretch")
 
     # Monthly breakdown for recent years
     _MONTH_NAMES = {
@@ -442,7 +459,7 @@ def render() -> None:
             yaxis_title="Papers saved",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        st.plotly_chart(fig7, use_container_width=True)
+        st.plotly_chart(fig7, width="stretch")
 
     st.divider()
 
@@ -468,7 +485,7 @@ def render() -> None:
                 xaxis_title="Number of patients (n)",
                 yaxis_title="Number of studies",
             )
-            st.plotly_chart(fig8, use_container_width=True)
+            st.plotly_chart(fig8, width="stretch")
 
         with col_h2:
             sorted_ns = sorted(patient_ns)
@@ -563,4 +580,4 @@ def _render_specialty_journal_heatmap() -> None:
         xaxis=dict(tickangle=-45, tickfont=dict(size=11)),
         yaxis=dict(tickfont=dict(size=12)),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
