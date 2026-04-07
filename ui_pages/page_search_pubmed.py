@@ -111,7 +111,6 @@ SPECIALTY_JOURNAL_TERMS = {
     },
     "Open-Access": {
         "JAMA Network Open": '"JAMA Netw Open"[Journal]',
-        "BMJ Open": '"BMJ Open"[Journal]',
     },
     "Palliative Care": {
         "Journal of Pain and Symptom Management": '"J Pain Symptom Manage"[Journal]',

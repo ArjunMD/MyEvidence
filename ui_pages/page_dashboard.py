@@ -363,7 +363,6 @@ _LABEL_TO_DB_JOURNAL: Dict[str, str] = {
     "Hepatology": "hepatology (baltimore, md.)",
     "Journal of Hepatology": "journal of hepatology",
     "JAMA Network Open": "jama network open",
-    "BMJ Open": "bmj open",
     "Journal of Pain and Symptom Management": "journal of pain and symptom management",
 }
 
@@ -386,7 +385,13 @@ def _get_journal_counts() -> Dict[str, Tuple[int, int]]:
     result: Dict[str, Tuple[int, int]] = {}
     for label, db_key in _LABEL_TO_DB_JOURNAL.items():
         s = saved_by_db.get(db_key, 0)
+        # Hidden articles may be stored under the full DB name OR the short
+        # display label (the Search PubMed page historically stored the label).
+        # Sum both to avoid undercounting.
         h = hidden_by_db.get(db_key, 0)
+        label_key = label.lower().strip()
+        if label_key != db_key:
+            h += hidden_by_db.get(label_key, 0)
         result[label] = (s, h)
     return result
 
