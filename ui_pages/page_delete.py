@@ -226,15 +226,19 @@ def render() -> None:
             if not gid:
                 continue
             title = (r.get("title") or r.get("guideline_name") or r.get("filename") or "").strip()
+            society = (r.get("society") or "").strip()
             year = (r.get("year") or r.get("pub_year") or "").strip()
             specialty = (r.get("specialty") or "").strip()
-            guidelines.append({"guideline_id": gid, "title": title, "year": year, "specialty": specialty})
+            guidelines.append({"guideline_id": gid, "title": title, "society": society, "year": year, "specialty": specialty})
 
         def _guideline_label(r: Dict[str, str]) -> str:
             title = (r.get("title") or "").strip()
+            soc = (r.get("society") or "").strip()
             year = (r.get("year") or "").strip()
             spec = (r.get("specialty") or "").strip()
             bits = [title]
+            if soc:
+                bits.append(f"[{soc}]")
             if year:
                 bits.append(f"({year})")
             if spec:
@@ -268,18 +272,21 @@ def render() -> None:
             _gid_marker = f"_manage_guideline_loaded_{sel_gid}"
             if not st.session_state.get(_gid_marker):
                 st.session_state[f"manage_gname_{sel_gid}"] = meta.get("guideline_name") or ""
+                st.session_state[f"manage_gsociety_{sel_gid}"] = meta.get("society") or ""
                 st.session_state[f"manage_gyear_{sel_gid}"] = meta.get("pub_year") or ""
                 st.session_state[f"manage_gspec_{sel_gid}"] = meta.get("specialty") or ""
                 st.session_state[f"manage_gdisplay_{sel_gid}"] = get_guideline_recommendations_display(sel_gid) or ""
                 st.session_state[_gid_marker] = True
 
             # --- Editable metadata fields ---
-            gm1, gm2, gm3 = st.columns(3, gap="medium")
+            gm1, gm2, gm3, gm4 = st.columns([2, 1, 1, 1], gap="medium")
             with gm1:
                 st.text_input("Name", key=f"manage_gname_{sel_gid}", placeholder=meta.get("filename") or "Guideline name")
             with gm2:
-                st.text_input("Published year", key=f"manage_gyear_{sel_gid}", placeholder="e.g., 2023")
+                st.text_input("Society", key=f"manage_gsociety_{sel_gid}", placeholder="e.g., ACG, AHA/ACC")
             with gm3:
+                st.text_input("Published year", key=f"manage_gyear_{sel_gid}", placeholder="e.g., 2023")
+            with gm4:
                 st.text_input("Specialty", key=f"manage_gspec_{sel_gid}", placeholder="e.g., Cardiology, Critical Care")
 
             # --- Editable recommendations display ---
@@ -296,6 +303,7 @@ def render() -> None:
             with gbtn_left:
                 if st.button("Save changes", type="primary", width="stretch", key=f"btn_save_guideline_{sel_gid}"):
                     name_raw = (st.session_state.get(f"manage_gname_{sel_gid}") or "").strip()
+                    society_raw = (st.session_state.get(f"manage_gsociety_{sel_gid}") or "").strip()
                     year_raw = (st.session_state.get(f"manage_gyear_{sel_gid}") or "").strip()
                     spec_raw = (st.session_state.get(f"manage_gspec_{sel_gid}") or "").strip()
                     disp_raw = (st.session_state.get(f"manage_gdisplay_{sel_gid}") or "").strip()
@@ -310,6 +318,7 @@ def render() -> None:
                                 guideline_name=name_raw or None,
                                 pub_year=year_parsed or None,
                                 specialty=_parse_tag_list(spec_raw) or None,
+                                society=society_raw or None,
                             )
                             update_guideline_recommendations_display(sel_gid, disp_raw)
                             st.session_state.pop(_gid_marker, None)

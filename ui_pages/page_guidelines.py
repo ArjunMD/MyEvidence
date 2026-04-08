@@ -94,9 +94,10 @@ def render() -> None:
 
     def _fmt_g(g):
         name = (g.get("guideline_name") or "").strip() or (g.get("filename") or "")
+        soc = (g.get("society") or "").strip()
         year = (g.get("pub_year") or "").strip()
         spec = (g.get("specialty") or "").strip()
-        bits = [b for b in [year, spec] if b]
+        bits = [b for b in [soc, year, spec] if b]
         meta = (" • ".join(bits) + " — ") if bits else ""
         return f"{name} — {meta}{g.get('uploaded_at', '')}"
 
@@ -114,30 +115,35 @@ def render() -> None:
     if st.session_state.get("guideline_meta_loaded_gid") != gid:
         st.session_state["guideline_meta_loaded_gid"] = gid
         st.session_state["guideline_meta_name"] = (chosen.get("guideline_name") or "").strip()
+        st.session_state["guideline_meta_society"] = (chosen.get("society") or "").strip()
         st.session_state["guideline_meta_year"] = (chosen.get("pub_year") or "").strip()
         st.session_state["guideline_meta_spec"] = (chosen.get("specialty") or "").strip()
 
     pending = st.session_state.pop("guideline_meta_pending", None)
     if isinstance(pending, dict) and (pending.get("gid") or "") == gid:
         st.session_state["guideline_meta_name"] = (pending.get("name") or "").strip()
+        st.session_state["guideline_meta_society"] = (pending.get("society") or "").strip()
         st.session_state["guideline_meta_year"] = (pending.get("year") or "").strip()
         st.session_state["guideline_meta_spec"] = (pending.get("spec") or "").strip()
 
     st.divider()
     st.subheader("Guideline metadata")
 
-    m1, m2, m3, m4 = st.columns([2, 1, 1, 1], gap="large")
+    m1, m2, m3, m4, m5 = st.columns([2, 1, 1, 1, 1], gap="large")
 
     with m1:
         st.text_input("Name", key="guideline_meta_name", placeholder=chosen.get("filename") or "Guideline name")
     with m2:
-        st.text_input("Published year", key="guideline_meta_year", placeholder="e.g., 2023")
+        st.text_input("Society", key="guideline_meta_society", placeholder="e.g., ACG, AHA/ACC")
     with m3:
+        st.text_input("Published year", key="guideline_meta_year", placeholder="e.g., 2023")
+    with m4:
         st.text_input("Specialty", key="guideline_meta_spec", placeholder="e.g., Cardiology, Critical Care")
 
-    with m4:
+    with m5:
         if st.button("Save metadata (if changed)", type="primary", width="stretch", key="guideline_meta_save"):
             name_raw = (st.session_state.get("guideline_meta_name") or "").strip()
+            society_raw = (st.session_state.get("guideline_meta_society") or "").strip()
             year_raw = (st.session_state.get("guideline_meta_year") or "").strip()
             spec_raw = (st.session_state.get("guideline_meta_spec") or "").strip()
 
@@ -151,6 +157,7 @@ def render() -> None:
                         guideline_name=name_raw or None,
                         pub_year=year_parsed or None,
                         specialty=_parse_tag_list(spec_raw) or None,
+                        society=society_raw or None,
                     )
                     st.success("Metadata saved.")
                     st.rerun()

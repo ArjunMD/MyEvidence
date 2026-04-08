@@ -268,8 +268,11 @@ def render() -> None:
         st.subheader(f"📘 {title}")
 
         bits = []
+        soc = (meta.get("society") or "").strip()
         y = (meta.get("pub_year") or "").strip()
         s = (meta.get("specialty") or "").strip()
+        if soc:
+            bits.append(soc)
         if y:
             bits.append(y)
         if s:

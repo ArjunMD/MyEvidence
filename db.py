@@ -741,6 +741,11 @@ def ensure_guidelines_schema() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_pub_year ON guidelines(pub_year);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_guidelines_specialty ON guidelines(specialty);")
 
+        # -- migration: add society column if missing --
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(guidelines);").fetchall()}
+        if "society" not in cols:
+            conn.execute("ALTER TABLE guidelines ADD COLUMN society TEXT;")
+
 
 def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
     s = (sha256 or "").strip()
@@ -750,7 +755,7 @@ def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
         row = conn.execute(
             """
             SELECT guideline_id, filename, stored_path, sha256, bytes, uploaded_at,
-                   guideline_name, pub_year, specialty, meta_extracted_at,
+                   guideline_name, pub_year, specialty, society, meta_extracted_at,
                    recommendations_display_md, recommendations_display_updated_at
             FROM guidelines
             WHERE sha256=?
@@ -770,6 +775,7 @@ def find_guideline_by_hash(sha256: str) -> Optional[Dict[str, str]]:
             "guideline_name": (row["guideline_name"] or "").strip(),
             "pub_year": (row["pub_year"] or "").strip(),
             "specialty": (row["specialty"] or "").strip(),
+            "society": (row["society"] or "").strip(),
             "meta_extracted_at": (row["meta_extracted_at"] or "").strip(),
             "recommendations_display_md": (row["recommendations_display_md"] or "").strip(),
             "recommendations_display_updated_at": (row["recommendations_display_updated_at"] or "").strip(),
@@ -809,6 +815,7 @@ def save_guideline_pdf(filename: str, pdf_bytes: bytes) -> Dict[str, str]:
         "guideline_name": "",
         "pub_year": "",
         "specialty": "",
+        "society": "",
         "meta_extracted_at": "",
         "recommendations_display_md": "",
         "recommendations_display_updated_at": "",
@@ -820,7 +827,7 @@ def list_guidelines(limit: int) -> List[Dict[str, str]]:
         rows = conn.execute(
             """
             SELECT guideline_id, filename, stored_path, sha256, bytes, uploaded_at,
-                   guideline_name, pub_year, specialty, meta_extracted_at
+                   guideline_name, pub_year, specialty, society, meta_extracted_at
             FROM guidelines
             ORDER BY uploaded_at DESC
             LIMIT ?;
@@ -841,6 +848,7 @@ def list_guidelines(limit: int) -> List[Dict[str, str]]:
                 "guideline_name": (r["guideline_name"] or "").strip(),
                 "pub_year": (r["pub_year"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
+                "society": (r["society"] or "").strip(),
                 "meta_extracted_at": (r["meta_extracted_at"] or "").strip(),
             }
         )
@@ -864,7 +872,7 @@ def get_guideline_meta(guideline_id: str) -> Dict[str, str]:
         row = conn.execute(
             """
             SELECT guideline_id, filename, sha256, stored_path, uploaded_at, bytes,
-                   guideline_name, pub_year, specialty, meta_extracted_at
+                   guideline_name, pub_year, specialty, society, meta_extracted_at
             FROM guidelines
             WHERE guideline_id=? LIMIT 1;
             """,
@@ -882,6 +890,7 @@ def get_guideline_meta(guideline_id: str) -> Dict[str, str]:
             "guideline_name": (row["guideline_name"] or "").strip(),
             "pub_year": (row["pub_year"] or "").strip(),
             "specialty": (row["specialty"] or "").strip(),
+            "society": (row["society"] or "").strip(),
             "meta_extracted_at": (row["meta_extracted_at"] or "").strip(),
         }
 
@@ -923,6 +932,7 @@ def update_guideline_metadata(
     guideline_name: Optional[str],
     pub_year: Optional[str],
     specialty: Optional[str],
+    society: Optional[str] = None,
 ) -> None:
     gid = (guideline_id or "").strip()
     if not gid:
@@ -932,15 +942,16 @@ def update_guideline_metadata(
     name = (guideline_name or "").strip() or None
     year = (pub_year or "").strip() or None
     spec = (specialty or "").strip() or None
+    soc = (society or "").strip() or None
 
     with _connect_db() as conn:
         conn.execute(
             """
             UPDATE guidelines
-            SET guideline_name=?, pub_year=?, specialty=?, meta_extracted_at=?
+            SET guideline_name=?, pub_year=?, specialty=?, society=?, meta_extracted_at=?
             WHERE guideline_id=?;
             """,
-            (name, year, spec, now, gid),
+            (name, year, spec, soc, now, gid),
         )
 
 
@@ -954,7 +965,8 @@ def list_browse_guideline_items(limit: int) -> List[Dict[str, str]]:
                 guideline_id,
                 COALESCE(NULLIF(guideline_name,''), filename) AS title,
                 COALESCE(pub_year,'') AS year,
-                COALESCE(specialty,'') AS specialty
+                COALESCE(specialty,'') AS specialty,
+                COALESCE(society,'') AS society
             FROM guidelines
             ORDER BY
                 specialty COLLATE NOCASE ASC,
@@ -974,6 +986,7 @@ def list_browse_guideline_items(limit: int) -> List[Dict[str, str]]:
                 "title": (r["title"] or "").strip(),
                 "year": (r["year"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
+                "society": (r["society"] or "").strip(),
             }
         )
     return out
@@ -992,6 +1005,7 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
         "COALESCE(g.filename,'')",
         "COALESCE(g.pub_year,'')",
         "COALESCE(g.specialty,'')",
+        "COALESCE(g.society,'')",
         "COALESCE(g.recommendations_display_md,'')",
     ]
 
@@ -1006,7 +1020,8 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
                 g.guideline_id,
                 COALESCE(NULLIF(g.guideline_name,''), g.filename) AS title,
                 COALESCE(g.pub_year,'') AS year,
-                COALESCE(g.specialty,'') AS specialty
+                COALESCE(g.specialty,'') AS specialty,
+                COALESCE(g.society,'') AS society
             FROM guidelines g
             WHERE {where_sql}
             ORDER BY
@@ -1026,6 +1041,7 @@ def search_guidelines(limit: int, q: str) -> List[Dict[str, str]]:
                 "title": (r["title"] or "").strip(),
                 "year": (r["year"] or "").strip(),
                 "specialty": (r["specialty"] or "").strip(),
+                "society": (r["society"] or "").strip(),
             }
         )
     return gout

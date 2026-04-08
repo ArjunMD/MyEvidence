@@ -2395,15 +2395,24 @@ def gpt_extract_guideline_title_year(
     fn = (filename or "").strip()
     sn = (snippet or "").strip()
     if not sn:
-        return {"guideline_name": "", "pub_year": ""}
+        return {"guideline_name": "", "society": "", "pub_year": ""}
 
     instructions = (
         "You extract metadata from a clinical guideline document excerpt.\n"
         "Return ONLY valid JSON (no markdown) with this exact shape:\n"
-        "{\"guideline_name\":\"...\",\"pub_year\":\"...\"}\n"
+        "{\"guideline_name\":\"...\",\"society\":\"...\",\"pub_year\":\"...\"}\n"
         "Rules:\n"
         "- Use ONLY what is explicitly present in the text.\n"
-        "- guideline_name: the most official/primary guideline title as shown.\n"
+        "- guideline_name: the guideline title WITHOUT the society/organization name prefix "
+        "and WITHOUT any year. Strip leading society names, acronyms, and boilerplate like "
+        "'Clinical Guideline:', 'Clinical Practice Update:', 'Practice Guideline:', "
+        "'Expert Consensus', etc. Also strip any leading or trailing 4-digit year. "
+        "Keep the core clinical topic and scope. "
+        "Example: '2026 ACG Clinical Guideline: Hepatic Encephalopathy' "
+        "→ guideline_name='Hepatic Encephalopathy', society='ACG', pub_year='2026'.\n"
+        "- society: the abbreviated name (acronym) of the publishing society/organization "
+        "(e.g. 'ACG', 'AHA/ACC', 'IDSA', 'SCCM', 'AGA', 'KDIGO', 'ASCO'). "
+        "If multiple societies, join with '/'. If not identifiable, use empty string.\n"
         "- pub_year: a 4-digit year ONLY if explicitly stated as the publication year; else empty string.\n"
         "- If multiple years appear, choose the one most clearly tied to publication.\n"
         "- Strings only; never null; no extra keys."
@@ -2430,21 +2439,22 @@ def gpt_extract_guideline_title_year(
 
     raw = (_extract_output_text(r.json()) or "").strip()
     if not raw:
-        return {"guideline_name": "", "pub_year": ""}
+        return {"guideline_name": "", "society": "", "pub_year": ""}
 
     try:
         obj = json.loads(raw)
     except Exception:
         m = re.search(r"(\{.*\})", raw, flags=re.DOTALL)
         if not m:
-            return {"guideline_name": "", "pub_year": ""}
+            return {"guideline_name": "", "society": "", "pub_year": ""}
         try:
             obj = json.loads(m.group(1))
         except Exception:
-            return {"guideline_name": "", "pub_year": ""}
+            return {"guideline_name": "", "society": "", "pub_year": ""}
 
     return {
         "guideline_name": (obj.get("guideline_name") or "").strip(),
+        "society": (obj.get("society") or "").strip(),
         "pub_year": (obj.get("pub_year") or "").strip(),
     }
 
@@ -2474,13 +2484,16 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
     fn = meta.get("filename", "")
 
     gname = ""
+    society = ""
     year = ""
     try:
         out = gpt_extract_guideline_title_year(fn, snippet, timeout_s=15, max_attempts=1)
         gname = (out.get("guideline_name") or "").strip()
+        society = (out.get("society") or "").strip()
         year = _parse_year4(out.get("pub_year") or "")
     except Exception:
         gname = ""
+        society = ""
         year = ""
 
     if not year:
@@ -2493,6 +2506,7 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
 
     existing = get_guideline_meta(gid) or {}
     final_name = (gname or "").strip() or (existing.get("guideline_name") or "").strip()
+    final_society = (society or "").strip() or (existing.get("society") or "").strip()
     final_year = (year or "").strip() or (existing.get("pub_year") or "").strip()
     final_spec = (spec or "").strip() or (existing.get("specialty") or "").strip()
 
@@ -2501,6 +2515,7 @@ def extract_and_store_guideline_metadata_azure(guideline_id: str, pdf_bytes: byt
         guideline_name=final_name or None,
         pub_year=final_year or None,
         specialty=final_spec or None,
+        society=final_society or None,
     )
 
-    return {"guideline_name": final_name, "pub_year": final_year, "specialty": final_spec}
+    return {"guideline_name": final_name, "society": final_society, "pub_year": final_year, "specialty": final_spec}

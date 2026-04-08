@@ -35,14 +35,16 @@ def _render_browse_item(it: Dict[str, str]) -> None:
     if (it.get("type") or "") == "guideline":
         title = (it.get("title") or "").strip() or "(no name)"
         gid = (it.get("guideline_id") or "").strip()
+        society = (it.get("society") or "").strip()
         safe_title = html.escape(title)
+        soc_part = f" <i style='opacity:0.55;'>({html.escape(society)})</i>" if society else ""
         if gid:
             st.markdown(
-                f"- {safe_title}{_browse_search_link(gid=gid)}",
+                f"- {safe_title}{soc_part}{_browse_search_link(gid=gid)}",
                 unsafe_allow_html=True,
             )
         else:
-            st.markdown(f"- {safe_title}", unsafe_allow_html=True)
+            st.markdown(f"- {safe_title}{soc_part}", unsafe_allow_html=True)
         return
 
     pmid = (it.get("pmid") or "").strip()
